@@ -15,14 +15,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Run Cppcheck in Docker
+      - name: Install Dependencies
         run: |
-          docker run --rm -v ${{ github.workspace }}:/code yhl0607/static-analysis:latest \
-          cppcheck --enable=all --inconclusive --std=c++17 --suppress=missingIncludeSystem /code
+          sudo apt-get update
+          sudo apt-get install clang-tools cppcheck -y
 
-      - name: Run Scan Build in Docker
+      - name: List directories (for debugging)
         run: |
-          docker run --rm -v ${{ github.workspace }}:/code yhl0607/static-analysis:latest \
-          bash -c "cd /code/ex01/src && scan-build g++ -o my_program *.cpp"
+          ls -R
 
+      - name: Run Cppcheck
+        run: cppcheck --enable=all --inconclusive --std=c++17 --suppress=missingIncludeSystem .
 
+      - name: Run Scan Build
+        run: |
+          cd ex01/src
+          find . -name "*.cpp" -exec scan-build g++ -o my_program {} +
