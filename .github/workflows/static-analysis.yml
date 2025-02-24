@@ -15,19 +15,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
+      - name: Cache APT packages
+        uses: actions/cache@v3
+        with:
+          path: /var/cache/apt/archives
+          key: apt-cache-${{ runner.os }}-${{ hashFiles('.github/workflows/static-analysis.yml') }}
+          restore-keys: |
+            apt-cache-${{ runner.os }}-
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install clang-tools cppcheck -y
-
-      - name: List directories (for debugging)
-        run: |
-          ls -R
+          sudo apt-get install clang-tools cppcheck -y --no-install-recommends
 
       - name: Run Cppcheck
         run: cppcheck --enable=all --inconclusive --std=c++17 --suppress=missingIncludeSystem .
 
       - name: Run Scan Build
         run: |
-          cd ex00/src
+          cd ex01/src
           find . -name "*.cpp" -exec scan-build g++ -o my_program {} +
+
