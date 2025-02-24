@@ -14,3 +14,21 @@
  * @author 
  * - 10927262 呂易鴻
  */
+
+ #include <algorithm>
+ #include <fstream>
+ #include <functional>
+ #include <iomanip>
+ #include <iostream>
+ #include <limits>
+ #include <mutex>
+ #include <queue>
+ #include <sstream>
+ #include <stdexcept>
+ #include <string>
+ #include <thread>
+ #include <vector>
+
+ int main() {
+    return 0;
+ }
