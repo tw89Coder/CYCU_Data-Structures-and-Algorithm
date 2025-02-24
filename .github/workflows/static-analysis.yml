@@ -29,5 +29,5 @@ jobs:
 
       - name: Run Scan Build
         run: |
-          cd ex01/src
+          cd ex00/src
           find . -name "*.cpp" -exec scan-build g++ -o my_program {} +
