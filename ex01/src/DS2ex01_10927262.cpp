@@ -1,15 +1,11 @@
 /** 
  * @file DS2ex01_10927262.cpp
  * @brief A program that uses Heap to manage graduate data.
- * @version 1.0.0
+ * @version 1.1.0
  *
  * @details
- * This program provides functionalities to read and process graduate data stored in files
- * using a Heap as the underlying data structure. The main features include:
- * - 123
- *
- * The program supports input files formatted in Tab-separated values (TSV) and organizes
- * the data in the BST with graduate numbers as the key.
+ * This program reads and processes graduate data using a heap-based structure.
+ * It supports min-heaps, max-heaps, and deaps for efficient data handling.
  *
  * @author 
  * - 10927262 呂易鴻
@@ -26,6 +22,13 @@
 #include <string>
 #include <vector>
 
+/**
+ * @class HeapBase
+ * @brief Base class for heap structures.
+ *
+ * This class provides common heap functionalities, including insertion, deletion,
+ * height calculation, and heap property maintenance.
+ */
 template <typename T>
 class HeapBase {
 protected:
@@ -37,24 +40,30 @@ protected:
 public:
     virtual ~HeapBase() = default;
 
+    /** @brief Checks if the heap is empty. */
     bool isEmpty() const { return data.empty(); }
 
+    /** @brief Returns the size of the heap. */
     int size() const { return data.size(); }
 
+    /** @brief Clears all elements from the heap. */
     void clear() { data.clear(); }
 
+    /** @brief Returns the top (root) element of the heap. */
     const std::pair<int, T>& top() const {
         if (data.empty()) throw std::runtime_error("Heap is empty!");
 
         return data[0];
     }
 
+    /** @brief Returns the bottom-most element of the heap. */
     const std::pair<int, T>& bottom() const {
         if (data.empty()) throw std::runtime_error("Heap is empty!");
 
         return data.back();
     }
 
+    /** @brief Returns the leftmost bottom element of the heap. */
     const std::pair<int, T>& leftmostBottom() const {
         if (data.empty()) throw std::runtime_error("Heap is empty!");
     
@@ -66,31 +75,39 @@ public:
         return data[index];
     }    
 
+    /** @brief Inserts a new element into the heap. */
     virtual void push(int key, const T& value) {
         data.emplace_back(key, value);
         heapifyUp(data.size() - 1);
     }
 
-    virtual void pop() {
+    /** @brief Removes and returns the top element of the heap. */
+    virtual std::pair<int, T> pop() {
         if (data.empty()) throw std::runtime_error("Heap is empty!");
+        std::pair<int, T> popData = data[0];
         data[0] = data.back();
         data.pop_back();
 
         if (!data.empty()) heapifyDown(0);
+
+        return popData;
     }
 
+    /** @brief Returns the height of the heap. */
     int height() const {
         if (data.empty()) return 0;
 
         return static_cast<int>(std::floor(std::log2(data.size()))) + 1;
     }
 
+    /** @brief Returns the height of the heap including additional nodes. */
     int height(int nodeNum) const {
         if (data.empty()) return 0;
 
         return static_cast<int>(std::floor(std::log2(data.size() + nodeNum))) + 1;
     }
 
+    /** @brief Replaces an element at a specific index and restores heap property. */
     std::pair<int, T> replaceAt(int index, int newKey, const T& newValue) {
         if (index < 0 || (index >= data.size())) {
             throw std::out_of_range("Index out of range");
@@ -109,6 +126,7 @@ public:
         return oldValue;
     }
 
+    /** @brief Retrieves an element at a specific index. */
     const std::pair<int, T>& getAt(int index) const {
         if (index < 0 || (index >= data.size())) {
             throw std::out_of_range("Index out of range");
@@ -117,6 +135,7 @@ public:
         return data[index];
     }
 
+    /** @brief Checks if the heap is a full binary tree. */
     bool isFullBinaryTree(int nodeCount) const {
         if (nodeCount == 0) return false;
     
@@ -125,6 +144,7 @@ public:
         return nodeCount == (1 << height) - 1;
     }
 
+    /** @brief Prints the heap elements. */
     void printHeap() const {
         for (const auto& item : data) {
             std::cout << "(" << item.first << ") ";
@@ -133,6 +153,12 @@ public:
     }
 };
 
+/**
+ * @class MinHeap
+ * @brief A minimum heap implementation based on HeapBase.
+ *
+ * Maintains a min-heap where the smallest key is always at the root.
+ */
 template <typename T>
 class MinHeap : public HeapBase<T> {
 protected:
@@ -167,6 +193,12 @@ protected:
     }
 };
 
+/**
+ * @class MaxHeap
+ * @brief A maximum heap implementation based on HeapBase.
+ *
+ * Maintains a max-heap where the largest key is always at the root.
+ */
 template <typename T>
 class MaxHeap : public HeapBase<T> {
 protected:
@@ -205,8 +237,10 @@ protected:
     }
 };
 
-
-
+/**
+ * @class Deap
+ * @brief A dual heap structure containing both a min-heap and a max-heap.
+ */
 template <typename T>
 class Deap {
 private:
@@ -223,13 +257,9 @@ public:
         maxHeap.clear();
     }
 
-    const T& topMin() const {
-        return minHeap.top();
-    }
+    const T& topMin() const { return minHeap.top(); }
 
-    const T& topMax() const {
-        return maxHeap.top();
-    }
+    const T& topMax() const { return maxHeap.top(); }
 
     const std::pair<int, T>& bottom() const {
         if (minHeap.isEmpty() && maxHeap.isEmpty()) {
@@ -278,22 +308,28 @@ public:
         }
     }
 
-    void popMin() {
+    std::pair<int, T> popMin() {
         if (minHeap.isEmpty()) throw std::runtime_error("Min heap is empty!");
-        minHeap.pop();
+        std::pair<int, T> popData = minHeap.pop();
+
         if (minHeap.size() < maxHeap.size()) {
             minHeap.push(maxHeap.top().first, maxHeap.top().second);
             maxHeap.pop();
         }
+
+        return popData;
     }
 
-    void popMax() {
+    std::pair<int, T> popMax() {
         if (maxHeap.isEmpty()) throw std::runtime_error("Max heap is empty!");
-        maxHeap.pop();
+        std::pair<int, T> popData = maxHeap.pop();
+
         if (maxHeap.size() < minHeap.size() - 1) {
             maxHeap.push(minHeap.top().first, minHeap.top().second);
             minHeap.pop();
         }
+
+        return popData;
     }
 
     void printHeaps() const {
@@ -309,19 +345,7 @@ public:
  /**
  * @class UniversityDepartment
  *
- * @brief Represents a graduate with various attributes like hp, types, and generation.
- *
- * This class provides getter and setter methods for all its attributes:
- * - Getter: Retrieve the value of an attribute.
- * - Setter: Modify the value of an attribute.
- * 
- * Example usage:
- * @code
- * graduate pikachu;
- * pikachu.setName("Pikachu");
- * pikachu.setHp(35);
- * std::cout << pikachu.getName() << " has " << pikachu.getHp() << " HP.";
- * @endcode
+ * @brief Represents graduate information.
  */
 class UniversityDepartment {
     private:
@@ -378,7 +402,7 @@ class UniversityDepartment {
 
 std::string removeNonNumeric(const std::string& str) {
     std::string cleanedStr;
-    for (char c : str) {
+    for (const char& c : str) {
         if (std::isdigit(c)) {
             cleanedStr += c;
         }
@@ -504,6 +528,7 @@ void printSaveData(std::vector<UniversityDepartment>& graduateInfoList) {
     }
 }
 
+/** @brief Processes graduate data using a min heap. */
 void Task1(MinHeap<UniversityDepartment> graduateInfo) {
     if (!graduateInfo.isEmpty()) graduateInfo.clear();
 
@@ -572,6 +597,7 @@ void Task1(MinHeap<UniversityDepartment> graduateInfo) {
     #endif
 }
 
+/** @brief Processes graduate data using a deap. */
 void Task2(Deap<UniversityDepartment> graduateInfo) {
     if (!graduateInfo.isEmpty()) graduateInfo.clear();
 
