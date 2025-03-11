@@ -1,7 +1,7 @@
 /** 
  * @file DS2ex01_10927262.cpp
  * @brief A program that uses Heap to manage graduate data.
- * @version 2.0.0
+ * @version 2.1.0
  *
  * @details
  * This program reads and processes graduate data using a heap-based structure.
@@ -347,23 +347,30 @@ public:
         return std::max(this->data[1], this->data[2]); // Max value is in second node or third node.
     }
  
-    void popMin() {
+    std::pair<int, T> popMin() {
         if (this->data.empty()) throw std::runtime_error("Heap is empty!");
+        std::pair<int, T> popData = this->data[0];
         this->data[0] = this->data.back();
         this->data.pop_back();
         heapifyDown(0);
+
+        return popData;
     }
  
-    void popMax() {
+    std::pair<int, T> popMax() {
         if (this->data.empty()) throw std::runtime_error("Heap is empty!");
         if (this->data.size() == 1) {
+            std::pair<int, T> popData = this->data[0];
             this->data.pop_back();
-            return;
+            return popData;
         }
         int maxIndex = (this->data.size() == 2) ? 1 : (this->data[1].first > this->data[2].first ? 1 : 2);
+        std::pair<int, T> popData = this->data[0];
         this->data[maxIndex] = this->data.back();
         this->data.pop_back();
         heapifyDown(maxIndex);
+
+        return popData;
     }
 };
 
