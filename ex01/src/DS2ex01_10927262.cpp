@@ -1,7 +1,7 @@
 /** 
  * @file DS2ex01_10927262.cpp
  * @brief A program that uses Heap to manage graduate data.
- * @version 1.1.0
+ * @version 1.1.1
  *
  * @details
  * This program reads and processes graduate data using a heap-based structure.
@@ -284,7 +284,8 @@ public:
             std::cout << "Test: " << minHeap.height(1) << " and " << maxHeap.height() << " ; " << key << std::endl;
         #endif
         if (minHeap.size() == maxHeap.size() ||
-            ((minHeap.height(1) - maxHeap.height()) == 1 && maxHeap.isFullBinaryTree(maxHeap.size()))) { // Insert min heap.
+            ((minHeap.height(1) - maxHeap.height()) == 1 && maxHeap.isFullBinaryTree(maxHeap.size()))) { 
+            // Insert min heap.
             
             if (minHeap.isEmpty()) {
                 minHeap.push(key, data);
@@ -400,6 +401,12 @@ class UniversityDepartment {
         void setSystemType(const std::string& systemTypeVal) { systemType = systemTypeVal; }
 };
 
+/**
+ * @brief Removes all non-numeric characters from the given string.
+ * 
+ * @param str The input string to be cleaned.
+ * @return A string containing only the numeric characters from the input string.
+ */
 std::string removeNonNumeric(const std::string& str) {
     std::string cleanedStr;
     for (const char& c : str) {
@@ -561,6 +568,7 @@ void Task1(MinHeap<UniversityDepartment> graduateInfo) {
         }
     }
 
+    // Build Min heap.
     for (const UniversityDepartment& info : graduateInfoList) {
         graduateInfo.push(info.getGraduateNum(), info);
     }
@@ -569,6 +577,7 @@ void Task1(MinHeap<UniversityDepartment> graduateInfo) {
         graduateInfo.printHeap();
     #endif
 
+    // Output information.
     std::cout << "<min heap>" << std::endl;
     UniversityDepartment root = graduateInfo.top().second;
     std::cout << "root: [" << root.getOrder() << "] " << root.getGraduateNum() << std::endl;
@@ -630,6 +639,7 @@ void Task2(Deap<UniversityDepartment> graduateInfo) {
         }
     }
 
+    // Build Deap.
     for (const UniversityDepartment& info : graduateInfoList) {
         graduateInfo.push(info.getStudentNum(), info);
     }
@@ -638,6 +648,7 @@ void Task2(Deap<UniversityDepartment> graduateInfo) {
     graduateInfo.printHeaps();
     #endif
 
+    // Output information.
     std::cout << "<DEAP>" << std::endl;
     UniversityDepartment bottom = graduateInfo.bottom().second;
     std::cout << "bottom: [" << bottom.getOrder() << "] " << bottom.getStudentNum() << std::endl;
