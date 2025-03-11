@@ -1,7 +1,7 @@
 /** 
  * @file DS2ex01_10927262.cpp
  * @brief A program that uses Heap to manage graduate data.
- * @version 2.1.0
+ * @version 2.1.1
  *
  * @details
  * This program reads and processes graduate data using a heap-based structure.
@@ -333,13 +333,13 @@ protected:
     }
  
 public:
-    T getMin() {
+    std::pair<int, T> getMin() {
         if (this->data.empty()) throw std::runtime_error("Heap is empty!");
 
         return this->data[0];
     }
  
-    T getMax() {
+    std::pair<int, T> getMax() {
         if (this->data.empty()) throw std::runtime_error("Heap is empty!");
         if (this->data.size() == 1) return this->data[0];
         if (this->data.size() == 2) return this->data[1];
@@ -394,9 +394,9 @@ public:
         maxHeap.clear();
     }
 
-    const T& topMin() const { return minHeap.top(); }
+    const std::pair<int, T>& topMin() const { return minHeap.top(); }
 
-    const T& topMax() const { return maxHeap.top(); }
+    const std::pair<int, T>& topMax() const { return maxHeap.top(); }
 
     const std::pair<int, T>& bottom() const {
         if (minHeap.isEmpty() && maxHeap.isEmpty()) {
@@ -825,7 +825,7 @@ void Task3(MinMaxHeap<UniversityDepartment> graduateInfo) {
         }
     }
 
-    // Build Min heap.
+    // Build MinMax heap.
     for (const UniversityDepartment& info : graduateInfoList) {
         graduateInfo.push(info.getGraduateNum(), info);
     }
