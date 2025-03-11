@@ -1,7 +1,7 @@
 /** 
  * @file DS2ex01_10927262.cpp
  * @brief A program that uses Heap to manage graduate data.
- * @version 1.1.1
+ * @version 2.0.0
  *
  * @details
  * This program reads and processes graduate data using a heap-based structure.
@@ -238,6 +238,136 @@ protected:
 };
 
 /**
+ * @class MinMaxHeap
+ * @brief A min-max heap implementation based on HeapBase.
+ */
+ template <typename T>
+ class MinMaxHeap : public HeapBase<T> {
+ protected:
+    /** @brief Check if is in Min level. */
+    bool isMinLevel(int index) {
+        return (static_cast<int>(log2(index + 1)) % 2 == 0);
+    }
+ 
+    void heapifyUp(int index) override {
+        if (index == 0) return;
+ 
+        int parent = (index - 1) / 2;
+        if (isMinLevel(index)) { // In Min level.
+            if (this->data[index].first > this->data[parent].first) { // Need to swap to Max level.
+                std::swap(this->data[index], this->data[parent]);
+                heapifyUpMax(parent);
+            } else {
+                heapifyUpMin(index);
+            }
+        } else { // In Max level.
+            if (this->data[index].first < this->data[parent].first) { // Need to swap to Min level.
+                std::swap(this->data[index], this->data[parent]);
+                heapifyUpMin(parent);
+            } else {
+                heapifyUpMax(index);
+            }
+        }
+    }
+ 
+    void heapifyUpMin(int index) {
+        if (index <= 2) return; // No grandparent.
+        int grandparent = (((index - 1) / 2) - 1) / 2;
+        if (this->data[index].first < this->data[grandparent].first) {
+            std::swap(this->data[index], this->data[grandparent]);
+            heapifyUpMin(grandparent);
+        }
+     }
+
+    void heapifyUpMax(int index) {
+        if (index <= 2) return; // No grandparent.
+        int grandparent = (((index - 1) / 2) - 1) / 2;
+        if (this->data[index].first > this->data[grandparent].first) {
+            std::swap(this->data[index], this->data[grandparent]);
+            heapifyUpMax(grandparent);
+        }
+    }
+
+    void heapifyDown(int index) override {
+        if (isMinLevel(index)) {
+            heapifyDownMin(index);
+        } else {
+            heapifyDownMax(index);
+        }
+    }
+ 
+    void heapifyDownMin(int index) {
+        int left = 2 * index + 1;
+        int right = 2 * index + 2;
+        int smallest = index;
+ 
+        if (left < this->data.size() && this->data[left].first < this->data[smallest].first) {
+            smallest = left;
+        }
+        if (right < this->data.size() && this->data[right].first < this->data[smallest].first) {
+             smallest = right;
+        }
+ 
+        if (smallest != index) {
+            std::swap(this->data[index], this->data[smallest]);
+            heapifyDownMin(smallest);
+        }
+    }
+
+    void heapifyDownMax(int index) {
+        int left = 2 * index + 1;
+        int right = 2 * index + 2;
+        int largest = index;
+ 
+        if (left < this->data.size() && this->data[left].first > this->data[largest].first) {
+            largest = left;
+        }
+        if (right < this->data.size() && this->data[right].first > this->data[largest].first) {
+            largest = right;
+        }
+ 
+        if (largest != index) {
+            std::swap(this->data[index], this->data[largest]);
+            heapifyDownMax(largest);
+        }
+    }
+ 
+public:
+    T getMin() {
+        if (this->data.empty()) throw std::runtime_error("Heap is empty!");
+
+        return this->data[0];
+    }
+ 
+    T getMax() {
+        if (this->data.empty()) throw std::runtime_error("Heap is empty!");
+        if (this->data.size() == 1) return this->data[0];
+        if (this->data.size() == 2) return this->data[1];
+
+        return std::max(this->data[1], this->data[2]); // Max value is in second node or third node.
+    }
+ 
+    void popMin() {
+        if (this->data.empty()) throw std::runtime_error("Heap is empty!");
+        this->data[0] = this->data.back();
+        this->data.pop_back();
+        heapifyDown(0);
+    }
+ 
+    void popMax() {
+        if (this->data.empty()) throw std::runtime_error("Heap is empty!");
+        if (this->data.size() == 1) {
+            this->data.pop_back();
+            return;
+        }
+        int maxIndex = (this->data.size() == 2) ? 1 : (this->data[1].first > this->data[2].first ? 1 : 2);
+        this->data[maxIndex] = this->data.back();
+        this->data.pop_back();
+        heapifyDown(maxIndex);
+    }
+};
+
+/**
  * @class Deap
  * @brief A dual heap structure containing both a min-heap and a max-heap.
  */
@@ -341,7 +471,6 @@ public:
         maxHeap.printHeap();
     }
 };
-
 
  /**
  * @class UniversityDepartment
@@ -656,12 +785,65 @@ void Task2(Deap<UniversityDepartment> graduateInfo) {
     std::cout << "leftmost bottom: [" << leftmostBottom.getOrder() << "] " << leftmostBottom.getStudentNum() << std::endl;
 }
 
+/** @brief Processes graduate data using a deap. */
+void Task3(MinMaxHeap<UniversityDepartment> graduateInfo) {
+    if (!graduateInfo.isEmpty()) graduateInfo.clear();
+
+    std::vector<UniversityDepartment> graduateInfoList;
+
+    // Continue to ask the user to enter the file number until the user chooses to exit.
+    while (true) {
+        std::string inputFileName = "";
+
+        std::cout << "Input a file number ([0] Quit): ";
+        std::cin >> inputFileName;
+
+        if ("0" == inputFileName) {
+            return; // Exit if the user enters 0.
+        } else {
+            inputFileName = "input" + inputFileName + ".txt";
+
+            // Try to open the file.
+            // If fail, enter the file name again.
+            if (!ReadFile(inputFileName, graduateInfoList)) continue;
+
+            // Check if the file contains any data.
+            if(!graduateInfoList.empty()) {
+                break; // Read data success, jump out the loop.
+            } else {
+                std::cout << std::endl;
+                std::cout << "### Get nothing from the file "<< inputFileName <<" ! ###" << std::endl;
+                return;
+            }
+        }
+    }
+
+    // Build Min heap.
+    for (const UniversityDepartment& info : graduateInfoList) {
+        graduateInfo.push(info.getGraduateNum(), info);
+    }
+
+    #ifdef DEBUG
+        graduateInfo.printHeap();
+    #endif
+
+    // Output information.
+    std::cout << "<min-max heap>" << std::endl;
+    UniversityDepartment root = graduateInfo.top().second;
+    std::cout << "root: [" << root.getOrder() << "] " << root.getGraduateNum() << std::endl;
+    UniversityDepartment bottom = graduateInfo.bottom().second;
+    std::cout << "bottom: [" << bottom.getOrder() << "] " << bottom.getGraduateNum() << std::endl;
+    UniversityDepartment leftmostBottom = graduateInfo.leftmostBottom().second;
+    std::cout << "leftmost bottom: [" << leftmostBottom.getOrder() << "] " << leftmostBottom.getGraduateNum() << std::endl;
+}
+
 int main() {
     int select_command = 0;
     int select_lower_bound = 0;
-    int select_upper_bound = 2;
+    int select_upper_bound = 3;
     MinHeap<UniversityDepartment> graduateInfoMinHeap;
     Deap<UniversityDepartment> graduateInfoDeap;
+    MinMaxHeap<UniversityDepartment> graduateInfoMinMaxHeap;
 
     do {
         while (true) {
@@ -670,8 +852,9 @@ int main() {
                 "* 0. QUIT                  *\n"
                 "* 1. Build a min heap    *\n"
                 "* 2. Build a DEAP          *\n"
+                "* 3. Build a min-max heap  *\n"
                 "****************************\n"
-                "Input a choice(0, 1, 2): ";
+                "Input a choice(0, 1, 2, 3): ";
 
             std::cin >> select_command;
 
@@ -698,6 +881,11 @@ int main() {
         case 2:
             std::cout << std::endl;
             Task2(graduateInfoDeap);
+            std::cout << std::endl;
+            break;
+        case 3:
+            std::cout << std::endl;
+            Task3(graduateInfoMinMaxHeap);
             std::cout << std::endl;
             break;
         default:
