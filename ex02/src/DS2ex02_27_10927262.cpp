@@ -1,7 +1,7 @@
 /** 
  * @file DS2ex02_27_10927262.cpp
  * @brief A program that utilizes 2-3 trees and AVL trees to efficiently manage and organize graduate student data.
- * @version 1.0.3
+ * @version 1.0.4
  *
  * @details
  * This program implements two different tree data structures, 2-3 trees and AVL trees, for storing and managing graduate student data. 
@@ -121,17 +121,16 @@ public:
     }
 
     /**
-     * @brief Retrieves all data from the root node.
-     * 
-     * @return A vector containing all the data in the root node.
-     */
+    * @brief Retrieves all data from the root node.
+    * 
+    * @return A vector containing all the data in the root node.
+    */
     std::vector<T> getRootData() const {
         std::vector<T> node_data;
+
         for (const auto& data_vector : root_->data) {
             if (!data_vector.empty()) {
-                for (const auto& data : data_vector) {
-                    node_data.push_back(data);
-                }
+                std::copy(data_vector.begin(), data_vector.end(), std::back_inserter(node_data));
             }
         }
 
@@ -185,9 +184,8 @@ public:
             std::cout << " }" << std::endl;
     
             // Add child nodes to the queue and update the height (level + 1)
-            for (BTreeNode<T>* child : node->children) {
-                queue.emplace_back(child, level + 1);
-            }
+            std::transform(node->children.begin(), node->children.end(), std::back_inserter(queue),
+               [level](BTreeNode<T>* child) { return std::make_pair(child, level + 1); });
         }
     }    
 
@@ -263,7 +261,7 @@ private:
      * @param index The index of the child node being split.
      * @param maxKeys The maximum number of keys per node.
      */
-    void split(BTreeNode<T>* parent, int index, int maxKeys_) {
+    void split(BTreeNode<T>* parent, int index, int maxKeys_) const {
         BTreeNode<T>* nodeToSplit = parent->children[index];
         BTreeNode<T>* newNode = new BTreeNode<T>();
     
@@ -426,7 +424,7 @@ public:
      * 
      * @param node The node to clear.
      */
-    void clearInternal(AVLTreeNode<T>* node) {
+    static void clearInternal(AVLTreeNode<T>* node) {
         if (node == nullptr) return;
 
         clearInternal(node->left);
@@ -963,7 +961,7 @@ void Task1(std::vector<UniversityDepartment>& graduate_info_list, BTree<int>& gr
  * @param graduate_info_list A vector containing the department information.
  * @param graduate_info The AVL tree to store the department data.
  */
-void Task2(std::vector<UniversityDepartment>& graduate_info_list, AVLTree<int>& graduate_info) {
+void Task2(const std::vector<UniversityDepartment>& graduate_info_list, AVLTree<int>& graduate_info) {
     if (!graduate_info.isEmpty()) {
         std::cout << "### AVL tree has been built. ###\n";
     } else {
