@@ -1,7 +1,7 @@
 /** 
- * @file DS2ex01_10927262.cpp
+ * @file DS2ex02_27_10927262.cpp
  * @brief A program that uses 2-3 tree and avl tree to manage graduate data.
- * @version 0.1.0
+ * @version 1.0.0
  *
  * @details
  * This program reads and processes graduate data using a tree structure.
@@ -12,9 +12,7 @@
  */
 
 #include <algorithm>
-#include <cmath>
 #include <fstream>
-#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -46,20 +44,20 @@ public:
     }
 };
 
-// B 樹類別 (Btree)
+// B 樹類別 (BTree)
 // 此類別包含 B 樹的主要邏輯，包括插入與節點分裂
 template <typename T>
-class Btree {
+class BTree {
 public:
     // 建構子
     // 接收樹的階數 `order` 並初始化根節點
     // 使用者可以選擇排序方式：字典排序 ("lexicographic") 或數字排序 ("numeric")
-    explicit Btree(int order, const std::string& mode = "B-tree", const std::string& sort_type = "lexicographic")
+    explicit BTree(int order, const std::string& mode = "B-tree", const std::string& sort_type = "lexicographic")
         : order_(order), mode_(mode), sort_type_(sort_type), root_(new BTreeNode<T>) {
         maxKeys_ = getMaxKeys();
     }
 
-    ~Btree() {
+    ~BTree() {
         delete root_;
     }
 
@@ -285,185 +283,219 @@ private:
     }
 };
 
+template <typename T>
+class AVLTreeNode {
+public:
+    std::string key;  // 鍵值
+    std::vector<T> data;  // 對應資料
+    AVLTreeNode* left;  // 左子節點
+    AVLTreeNode* right;  // 右子節點
+    int height;  // 樹的高度
+
+    // 預設建構子
+    AVLTreeNode(const std::string& key, const T& data)
+        : key(key), data({data}), left(nullptr), right(nullptr), height(1) {}
+
+    // 解構子
+    ~AVLTreeNode() {
+        left = nullptr;
+        right = nullptr;
+    }
+};
+
+template <typename T>
 class AVLTree {
-    public:
-        AVLTree() : root_(nullptr) {}
-    
-        ~AVLTree() {
-            clear(root_);
+public:
+    explicit AVLTree(const std::string& sort_type = "lexicographic")
+        : sort_type_(sort_type), root_(nullptr) {}
+
+    ~AVLTree() {
+        clear();
+    }
+
+    void clear() {
+        clearInternal(root_);
+        root_ = nullptr;
+    }
+
+    void clearInternal(AVLTreeNode<T>* node) {
+        if (node == nullptr) return;
+
+        clearInternal(node->left);
+        clearInternal(node->right);
+        delete node;  // Only delete the node once
+    }
+
+    bool isEmpty() const {
+        return root_ == nullptr;
+    }
+
+    // 插入函式
+    void insert(const std::string& key, const T& data) {
+        root_ = insertInternal(root_, key, data);
+    }
+
+    // 取得樹根
+    AVLTreeNode<T>* getRoot() const {
+        return root_;
+    }
+
+    std::vector<T> getRootData() const {
+        if (root_ == nullptr) {
+            throw std::runtime_error("Tree root is null");
         }
-    
-        void insert(int key) {
-            root_ = insert(root_, key);
+        return root_->data;
+    }
+
+    int getHeight() const {
+        return isEmpty() ? 0 : root_->height;
+    }
+
+    // 印出樹的結構
+    void printTree() const {
+        printTreeInternal(root_, 0);
+    }
+
+private:
+    std::string sort_type_;  // 排序類型 ("lexicographic" 或 "numeric")
+    AVLTreeNode<T>* root_;  // 樹的根節點
+
+    // 插入內部函式，保持樹的平衡
+    AVLTreeNode<T>* insertInternal(AVLTreeNode<T>* node, const std::string& key, const T& data) {
+        if (node == nullptr) {
+            return new AVLTreeNode<T>(key, data);  // 創建新節點
         }
-    
-        void remove(int key) {
-            root_ = remove(root_, key);
-        }
-    
-        bool search(int key) const {
-            return search(root_, key) != nullptr;
-        }
-    
-        void inorder() const {
-            inorder(root_);
-            std::cout << std::endl;
-        }
-    
-    private:
-        struct Node {
-            int key;
-            int height;
-            Node* left;
-            Node* right;
-    
-            Node(int k) : key(k), height(1), left(nullptr), right(nullptr) {}
-        };
-    
-        Node* root_;
-    
-        int height(Node* node) const {
-            return node ? node->height : 0;
-        }
-    
-        int getBalance(Node* node) const {
-            return node ? height(node->left) - height(node->right) : 0;
-        }
-    
-        Node* rotateRight(Node* y) {
-            Node* x = y->left;
-            Node* T2 = x->right;
-    
-            x->right = y;
-            y->left = T2;
-    
-            y->height = std::max(height(y->left), height(y->right)) + 1;
-            x->height = std::max(height(x->left), height(x->right)) + 1;
-    
-            return x;
-        }
-    
-        Node* rotateLeft(Node* x) {
-            Node* y = x->right;
-            Node* T2 = y->left;
-    
-            y->left = x;
-            x->right = T2;
-    
-            x->height = std::max(height(x->left), height(x->right)) + 1;
-            y->height = std::max(height(y->left), height(y->right)) + 1;
-    
-            return y;
-        }
-    
-        Node* insert(Node* node, int key) {
-            if (!node)
-                return new Node(key);
-    
-            if (key < node->key)
-                node->left = insert(node->left, key);
-            else if (key > node->key)
-                node->right = insert(node->right, key);
-            else
-                return node;
-    
-            node->height = 1 + std::max(height(node->left), height(node->right));
-            int balance = getBalance(node);
-    
-            if (balance > 1 && key < node->left->key)
-                return rotateRight(node);
-    
-            if (balance < -1 && key > node->right->key)
-                return rotateLeft(node);
-    
-            if (balance > 1 && key > node->left->key) {
-                node->left = rotateLeft(node->left);
-                return rotateRight(node);
-            }
-    
-            if (balance < -1 && key < node->right->key) {
-                node->right = rotateRight(node->right);
-                return rotateLeft(node);
-            }
-    
+
+        // 標準的二叉搜尋樹插入
+        if (compare(key, node->key) < 0) {
+            node->left = insertInternal(node->left, key, data);
+        } else if (compare(key, node->key) > 0) {
+            node->right = insertInternal(node->right, key, data);
+        } else {
+            // 如果相同鍵值存在，直接新增資料
+            node->data.push_back(data);
             return node;
         }
-    
-        Node* minValueNode(Node* node) const {
-            Node* current = node;
-            while (current->left)
-                current = current->left;
-            return current;
+
+        // 更新節點高度
+        node->height = 1 + std::max(getHeight(node->left), getHeight(node->right));
+
+        // 計算平衡因子並進行旋轉
+        int balance = getBalance(node);
+
+        // 左左情況
+        if (balance > 1 && compare(key, node->left->key) < 0) {
+            return rightRotate(node);
         }
-    
-        Node* remove(Node* root, int key) {
-            if (!root)
-                return root;
-    
-            if (key < root->key)
-                root->left = remove(root->left, key);
-            else if (key > root->key)
-                root->right = remove(root->right, key);
-            else {
-                if (!root->left || !root->right) {
-                    Node* temp = root->left ? root->left : root->right;
-                    delete root;
-                    return temp;
-                } else {
-                    Node* temp = minValueNode(root->right);
-                    root->key = temp->key;
-                    root->right = remove(root->right, temp->key);
-                }
-            }
-    
-            root->height = std::max(height(root->left), height(root->right)) + 1;
-            int balance = getBalance(root);
-    
-            if (balance > 1 && getBalance(root->left) >= 0)
-                return rotateRight(root);
-    
-            if (balance > 1 && getBalance(root->left) < 0) {
-                root->left = rotateLeft(root->left);
-                return rotateRight(root);
-            }
-    
-            if (balance < -1 && getBalance(root->right) <= 0)
-                return rotateLeft(root);
-    
-            if (balance < -1 && getBalance(root->right) > 0) {
-                root->right = rotateRight(root->right);
-                return rotateLeft(root);
-            }
-    
-            return root;
+
+        // 右右情況
+        if (balance < -1 && compare(key, node->right->key) > 0) {
+            return leftRotate(node);
         }
-    
-        Node* search(Node* root, int key) const {
-            if (!root || root->key == key)
-                return root;
-    
-            if (key < root->key)
-                return search(root->left, key);
-    
-            return search(root->right, key);
+
+        // 左右情況
+        if (balance > 1 && compare(key, node->left->key) > 0) {
+            node->left = leftRotate(node->left);
+            return rightRotate(node);
         }
-    
-        void inorder(Node* root) const {
-            if (root) {
-                inorder(root->left);
-                std::cout << root->key << " ";
-                inorder(root->right);
+
+        // 右左情況
+        if (balance < -1 && compare(key, node->right->key) < 0) {
+            node->right = rightRotate(node->right);
+            return leftRotate(node);
+        }
+
+        return node;
+    }
+
+    // 左旋轉操作
+    AVLTreeNode<T>* leftRotate(AVLTreeNode<T>* x) {
+        AVLTreeNode<T>* y = x->right;
+        AVLTreeNode<T>* T2 = y->left;
+
+        // 進行旋轉
+        y->left = x;
+        x->right = T2;
+
+        // 更新高度
+        x->height = 1 + std::max(getHeight(x->left), getHeight(x->right));
+        y->height = 1 + std::max(getHeight(y->left), getHeight(y->right));
+
+        return y;  // 返回新根
+    }
+
+    // 右旋轉操作
+    AVLTreeNode<T>* rightRotate(AVLTreeNode<T>* y) {
+        AVLTreeNode<T>* x = y->left;
+        AVLTreeNode<T>* T2 = x->right;
+
+        // 進行旋轉
+        x->right = y;
+        y->left = T2;
+
+        // 更新高度
+        y->height = 1 + std::max(getHeight(y->left), getHeight(y->right));
+        x->height = 1 + std::max(getHeight(x->left), getHeight(x->right));
+
+        return x;  // 返回新根
+    }
+
+    // 取得節點高度
+    int getHeight(AVLTreeNode<T>* node) const {
+        if (node == nullptr) {
+            return 0;
+        }
+        return node->height;
+    }
+
+    // 取得節點的平衡因子
+    int getBalance(AVLTreeNode<T>* node) const {
+        if (node == nullptr) {
+            return 0;
+        }
+        return getHeight(node->left) - getHeight(node->right);
+    }
+
+    // 比較函式，根據排序方式選擇字典排序或數字排序
+    int compare(const std::string& a, const std::string& b) const {
+        if (sort_type_ == "numeric") {
+            // 嘗試將字串轉為數字來進行比較
+            try {
+                int num_a = std::stoi(a);
+                int num_b = std::stoi(b);
+                return num_a - num_b;
+            } catch (const std::invalid_argument&) {
+                // 如果轉換失敗，回傳 0，避免出錯
+                return a.compare(b);
+            }
+        } else {
+            // 默認使用字典排序
+            // a < b return -1
+            return a.compare(b);
+        }
+    }
+
+    // 層次遍歷印出樹結構
+    void printTreeInternal(AVLTreeNode<T>* node, int level) const {
+        if (node == nullptr) {
+            return;
+        }
+
+        // 印出當前層次的節點
+        std::cout << "Level " << level << ": { " << node->key << ": [";
+        for (size_t i = 0; i < node->data.size(); ++i) {
+            std::cout << node->data[i];
+            if (i != node->data.size() - 1) {
+                std::cout << ", ";
             }
         }
-    
-        void clear(Node* node) {
-            if (node) {
-                clear(node->left);
-                clear(node->right);
-                delete node;
-            }
-        }
-    };
+        std::cout << "] }" << std::endl;
+
+        // 遞迴印出左右子樹
+        printTreeInternal(node->left, level + 1);
+        printTreeInternal(node->right, level + 1);
+    }
+};
 
  /**
  * @class UniversityDepartment
@@ -661,7 +693,7 @@ void printSaveData(const std::vector<UniversityDepartment>& graduateInfoList, co
 }
 
 /** @brief Processes graduate data using a min heap. */
-void Task1(std::vector<UniversityDepartment>& graduateInfoList, Btree<int>& graduateInfo) {
+void Task1(std::vector<UniversityDepartment>& graduateInfoList, BTree<int>& graduateInfo) {
     if (!graduateInfoList.empty()) {
         graduateInfoList.clear();
         graduateInfo.clear();
@@ -737,53 +769,19 @@ void Task1(std::vector<UniversityDepartment>& graduateInfoList, Btree<int>& grad
 }
 
 /** @brief Processes graduate data using a deap. */
-void Task2() {
-    // if (!graduateInfo.isEmpty()) graduateInfo.clear();
+void Task2(std::vector<UniversityDepartment>& graduateInfoList, AVLTree<int>& graduateInfo) {
+    if (!graduateInfo.isEmpty()) {
+        std::cout << "### AVL tree has been built. ###\n";
+    } else {
+        // Build AVLtree.
+        for (const UniversityDepartment& info : graduateInfoList) {
+            graduateInfo.insert(info.getDeptName(), info.getOrder());
+        }
+    }
 
-    // std::vector<UniversityDepartment> graduateInfoList;
-
-    // // Continue to ask the user to enter the file number until the user chooses to exit.
-    // while (true) {
-    //     std::string inputFileName = "";
-
-    //     std::cout << "Input a file number ([0] Quit): ";
-    //     std::cin >> inputFileName;
-
-    //     if ("0" == inputFileName) {
-    //         return; // Exit if the user enters 0.
-    //     } else {
-    //         inputFileName = "input" + inputFileName + ".txt";
-
-    //         // Try to open the file.
-    //         // If fail, enter the file name again.
-    //         if (!ReadFile(inputFileName, graduateInfoList)) continue;
-
-    //         // Check if the file contains any data.
-    //         if(!graduateInfoList.empty()) {
-    //             break; // Read data success, jump out the loop.
-    //         } else {
-    //             std::cout << std::endl;
-    //             std::cout << "### Get nothing from the file "<< inputFileName <<" ! ###" << std::endl;
-    //             return;
-    //         }
-    //     }
-    // }
-
-    // // Build Deap.
-    // for (const UniversityDepartment& info : graduateInfoList) {
-    //     graduateInfo.push(info.getStudentNum(), info);
-    // }
-
-    // #ifdef DEBUG
-    // graduateInfo.printHeaps();
-    // #endif
-
-    // // Output information.
-    // std::cout << "<DEAP>" << std::endl;
-    // UniversityDepartment bottom = graduateInfo.bottom().second;
-    // std::cout << "bottom: [" << bottom.getOrder() << "] " << bottom.getStudentNum() << std::endl;
-    // UniversityDepartment leftmostBottom = graduateInfo.leftmostBottom().second;
-    // std::cout << "leftmost bottom: [" << leftmostBottom.getOrder() << "] " << leftmostBottom.getStudentNum() << std::endl;
+    // Output information.
+    std::cout << "Tree height = " << graduateInfo.getHeight() << std::endl;
+    printSaveData(graduateInfoList, graduateInfo.getRootData());
 }
 
 int main() {
@@ -791,8 +789,8 @@ int main() {
     int select_lower_bound = 0;
     int select_upper_bound = 2;
     std::vector<UniversityDepartment> graduateInfoList;
-    Btree<int> graduateInfoBTreeOrder3(3, "2-3 tree", "lexicographic");
-    //AVLTree<UniversityDepartment> graduateInfoAVL;
+    BTree<int> graduateInfoBTreeOrder3(3, "2-3 tree", "lexicographic");
+    AVLTree<int> graduateInfoAVL("lexicographic");
 
     do {
         while (true) {
@@ -824,14 +822,16 @@ int main() {
         case 1:
             std::cout << std::endl;
             Task1(graduateInfoList, graduateInfoBTreeOrder3);
+
+            if (!graduateInfoAVL.isEmpty()) { graduateInfoAVL.clear(); }
+
             std::cout << std::endl;
             break;
         case 2:
-            std::cout << std::endl;
             if (graduateInfoList.empty()) {
                 std::cout << "### Choose 1 first. ###\n";
             } else {
-                Task2();
+                Task2(graduateInfoList, graduateInfoAVL);
             }
 
             std::cout << std::endl;
