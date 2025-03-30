@@ -1,7 +1,7 @@
 /** 
  * @file DS2ex02_27_10927262.cpp
  * @brief A program that utilizes 2-3 trees and AVL trees to efficiently manage and organize graduate student data.
- * @version 1.0.2
+ * @version 1.0.3
  *
  * @details
  * This program implements two different tree data structures, 2-3 trees and AVL trees, for storing and managing graduate student data. 
@@ -325,26 +325,27 @@ private:
     }    
 
     /**
-     * @brief Compares two keys based on the specified sorting type.
-     * 
-     * @param a The first key.
-     * @param b The second key.
-     * @return A negative value if a < b, zero if a == b, and a positive value if a > b.
-     */
-    int compare(const std::string& a, const std::string& b) const {
+    * @brief Compares two keys based on the sorting type.
+    * 
+    * @param first_key The first key to compare.
+    * @param second_key The second key to compare.
+    * @return A negative value if first_key < second_key, zero if first_key == second_key,
+    * and a positive value if first_key > second_key.
+    */
+    int compare(const std::string& first_key, const std::string& second_key) const {
         if (sort_type_ == "numeric") {
-            // Attempt to convert the strings to numbers for comparison
+            // Try converting strings to integers for numeric comparison
             try {
-                int num_a = std::stoi(a);
-                int num_b = std::stoi(b);
-                return num_a - num_b;
+                int numeric_first_key = std::stoi(first_key);
+                int numeric_second_key = std::stoi(second_key);
+                return numeric_first_key - numeric_second_key;
             } catch (const std::invalid_argument&) {
-                // If conversion fails, return 0 to avoid errors
-                return a.compare(b);
+                // If conversion fails, fallback to lexicographic comparison
+                return first_key.compare(second_key);
             }
         } else {
-            // Default to lexicographical comparison
-            return a.compare(b);  // a < b returns -1
+            // Default lexicographic comparison
+            return first_key.compare(second_key);  // first_key < second_key return -1
         }
     }
 };
@@ -550,45 +551,45 @@ private:
     }
 
     /**
-     * @brief Performs a left rotation on the given node.
-     * 
-     * @param x The node to rotate.
-     * @return The new root of the rotated subtree.
-     */
-    AVLTreeNode<T>* leftRotate(AVLTreeNode<T>* x) {
-        AVLTreeNode<T>* y = x->right;
-        AVLTreeNode<T>* T2 = y->left;
+    * @brief Performs a left rotation on the given node.
+    * 
+    * @param parent_node The node to rotate.
+    * @return The new root of the rotated subtree.
+    */
+    AVLTreeNode<T>* leftRotate(AVLTreeNode<T>* parent_node) {
+        AVLTreeNode<T>* right_child = parent_node->right;
+        AVLTreeNode<T>* left_subtree_of_right_child = right_child->left;
 
         // Perform rotation
-        y->left = x;
-        x->right = T2;
+        right_child->left = parent_node;
+        parent_node->right = left_subtree_of_right_child;
 
         // Update heights
-        x->height = 1 + std::max(getHeight(x->left), getHeight(x->right));
-        y->height = 1 + std::max(getHeight(y->left), getHeight(y->right));
+        parent_node->height = 1 + std::max(getHeight(parent_node->left), getHeight(parent_node->right));
+        right_child->height = 1 + std::max(getHeight(right_child->left), getHeight(right_child->right));
 
-        return y;  // Return new root
+        return right_child;  // Return new root
     }
 
     /**
-     * @brief Performs a right rotation on the given node.
-     * 
-     * @param y The node to rotate.
-     * @return The new root of the rotated subtree.
-     */
-    AVLTreeNode<T>* rightRotate(AVLTreeNode<T>* y) {
-        AVLTreeNode<T>* x = y->left;
-        AVLTreeNode<T>* T2 = x->right;
+    * @brief Performs a right rotation on the given node.
+    * 
+    * @param parent_node The node to rotate.
+    * @return The new root of the rotated subtree.
+    */
+    AVLTreeNode<T>* rightRotate(AVLTreeNode<T>* parent_node) {
+        AVLTreeNode<T>* left_child = parent_node->left;
+        AVLTreeNode<T>* right_subtree_of_left_child = left_child->right;
 
         // Perform rotation
-        x->right = y;
-        y->left = T2;
+        left_child->right = parent_node;
+        parent_node->left = right_subtree_of_left_child;
 
         // Update heights
-        y->height = 1 + std::max(getHeight(y->left), getHeight(y->right));
-        x->height = 1 + std::max(getHeight(x->left), getHeight(x->right));
+        parent_node->height = 1 + std::max(getHeight(parent_node->left), getHeight(parent_node->right));
+        left_child->height = 1 + std::max(getHeight(left_child->left), getHeight(left_child->right));
 
-        return x;  // Return new root
+        return left_child;  // Return new root
     }
 
     /**
@@ -618,26 +619,27 @@ private:
     }
 
     /**
-     * @brief Compares two keys based on the sorting type.
-     * 
-     * @param a The first key.
-     * @param b The second key.
-     * @return A negative value if a < b, zero if a == b, and a positive value if a > b.
-     */
-    int compare(const std::string& a, const std::string& b) const {
+    * @brief Compares two keys based on the sorting type.
+    * 
+    * @param first_key The first key to compare.
+    * @param second_key The second key to compare.
+    * @return A negative value if first_key < second_key, zero if first_key == second_key,
+    * and a positive value if first_key > second_key.
+    */
+    int compare(const std::string& first_key, const std::string& second_key) const {
         if (sort_type_ == "numeric") {
             // Try converting strings to integers for numeric comparison
             try {
-                int num_a = std::stoi(a);
-                int num_b = std::stoi(b);
-                return num_a - num_b;
+                int numeric_first_key = std::stoi(first_key);
+                int numeric_second_key = std::stoi(second_key);
+                return numeric_first_key - numeric_second_key;
             } catch (const std::invalid_argument&) {
                 // If conversion fails, fallback to lexicographic comparison
-                return a.compare(b);
+                return first_key.compare(second_key);
             }
         } else {
             // Default lexicographic comparison
-            return a.compare(b);  // a < b return -1
+            return first_key.compare(second_key);  // first_key < second_key return -1
         }
     }
 
