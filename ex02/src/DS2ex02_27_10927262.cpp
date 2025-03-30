@@ -1,10 +1,13 @@
 /** 
  * @file DS2ex02_27_10927262.cpp
- * @brief A program that uses 2-3 tree and avl tree to manage graduate data.
- * @version 1.0.1
+ * @brief A program that utilizes 2-3 trees and AVL trees to efficiently manage and organize graduate student data.
+ * @version 1.0.2
  *
  * @details
- * This program reads and processes graduate data using a tree structure.
+ * This program implements two different tree data structures, 2-3 trees and AVL trees, for storing and managing graduate student data. 
+ * It supports insertion and searching(Root) operations in both tree structures, ensuring efficient data retrieval and organization. 
+ * The program is designed to demonstrate the use of self-balancing trees in managing dynamic datasets like student records.
+ * The user can perform operations such as adding new graduates, and searching for specific students by various criteria.
  *
  * @author 
  * - Group 27
@@ -20,23 +23,31 @@
 #include <string>
 #include <vector>
 
-// 節點類別 (BTreeNode)
-// 每個節點包含以下成員：
-// 1. `keys` - 存放節點內所有的鍵值，保持排序狀態
-// 2. `children` - 指向子節點的指標，表示樹的分支
-// 3. `data` - 每個鍵值對應的資料，類型為 T
+/**
+ * @class BTreeNode
+ * @brief Represents a node in a B-Tree.
+ * 
+ * A node contains keys, associated data, and pointers to child nodes.
+ * It also maintains its height.
+ * 
+ * @tparam T The type of data stored in the node.
+ */
 template <typename T>
 class BTreeNode {
 public:
-    std::vector<std::string> keys; // 鍵值的集合，表示該節點內的數據 (修改為 string)
-    std::vector<std::vector<T>> data; // 每個鍵值對應的資料集合
-    std::vector<BTreeNode*> children; // 子節點的指標列表，用來指向下一層的節點
-    int height; // 節點的高度
+    std::vector<std::string> keys;     // A list of keys in the node, kept sorted.
+    std::vector<std::vector<T>> data;  // Data corresponding to each key in the node.
+    std::vector<BTreeNode*> children;  // List of pointers to child nodes.
+    int height;                        // Height of the node in the tree.
 
-    // 預設建構子
-    BTreeNode() : height(1) {} // 默認高度為 1 (葉子節點的高度)
+    /**
+     * @brief Default constructor initializes a node with height 1.
+     */
+    BTreeNode() : height(1) {}
 
-    // 解構子，負責釋放子節點記憶體
+    /**
+     * @brief Destructor to delete child nodes.
+     */
     ~BTreeNode() {
         for (auto child : children) {
             delete child;
@@ -44,88 +55,119 @@ public:
     }
 };
 
-// B 樹類別 (BTree)
-// 此類別包含 B 樹的主要邏輯，包括插入與節點分裂
+/**
+ * @class BTree
+ * @brief Represents a B-Tree.
+ * 
+ * This class provides methods for inserting keys, managing node splits, 
+ * and displaying the structure of the tree.
+ * 
+ * @tparam T The type of data stored in the tree.
+ */
 template <typename T>
 class BTree {
 public:
-    // 建構子
-    // 接收樹的階數 `order` 並初始化根節點
-    // 使用者可以選擇排序方式：字典排序 ("lexicographic") 或數字排序 ("numeric")
+    /**
+     * @brief Constructs a BTree with a specified order and sorting mode.
+     * 
+     * @param order The order of the tree (defines the maximum number of children per node).
+     * @param mode The mode of the tree ("B-tree" or "2-3 tree").
+     * @param sort_type The type of sorting ("lexicographic" or "numeric").
+     */
     explicit BTree(int order, const std::string& mode = "B-tree", const std::string& sort_type = "lexicographic")
         : order_(order), mode_(mode), sort_type_(sort_type), root_(new BTreeNode<T>) {
         maxKeys_ = getMaxKeys();
     }
 
+    /**
+     * @brief Destructor to clean up the tree.
+     */
     ~BTree() {
         delete root_;
     }
 
-    // 重新初始化整棵樹
+    /**
+     * @brief Clears the tree by deleting the root and creating a new empty tree.
+     */
     void clear() {
-        delete root_; // 先刪除原本的樹
-        root_ = new BTreeNode<T>(); // 創建一個新的空樹
+        delete root_;
+        root_ = new BTreeNode<T>();
     }
 
-    // 插入函式
-    // 將新的鍵值插入到 B 樹中
+    /**
+     * @brief Inserts a new key-value pair into the B-tree.
+     * 
+     * @param key The key to insert.
+     * @param data The data associated with the key.
+     */
     void insert(const std::string& key, const T& data) {
         insertInternal(root_, key, data, maxKeys_);
     
-        // 在插入完成後檢查根節點是否超出限制
-        if (root_->keys.size() > maxKeys_) {
+        if (root_->keys.size() > maxKeys_) {  // Check if outof bounds.
             BTreeNode<T>* temp = root_;
             root_ = new BTreeNode<T>();
             root_->children.push_back(temp);
-            split(root_, 0, maxKeys_); // 這裡才執行分裂
+            split(root_, 0, maxKeys_);
         }
     }    
     
-
+    /**
+     * @brief Gets the root node of the B-tree.
+     * 
+     * @return A pointer to the root node.
+     */
     BTreeNode<T>* getRoot() const {
         return root_;
     }
 
-    // 獲取指定節點的所有資料
+    /**
+     * @brief Retrieves all data from the root node.
+     * 
+     * @return A vector containing all the data in the root node.
+     */
     std::vector<T> getRootData() const {
-        std::vector<T> nodeData;
-        // 遍歷節點的資料
-        for (const auto& dataVec : root_->data) {
-            if (!dataVec.empty()) {
-                // 將 dataVec 中的每個元素加入 nodeData
-                for (const auto& data : dataVec) {
-                    nodeData.push_back(data);  // 正確地插入每個元素
+        std::vector<T> node_data;
+        for (const auto& data_vector : root_->data) {
+            if (!data_vector.empty()) {
+                for (const auto& data : data_vector) {
+                    node_data.push_back(data);
                 }
             }
         }
 
-        return nodeData;
+        return node_data;
     }
 
-    // 取得 B 樹的高度
+    /**
+     * @brief Gets the height of the B-tree.
+     * 
+     * @return The height of the root node.
+     */
     int getHeight() const {
-        return root_->height; // 直接返回根節點的高度
+        return root_->height;  // Directly return the height of the root node.
     }
 
-    // 印出 B 樹的結構 (層次顯示)
+    /**
+     * @brief Prints the structure of the B-tree in a level-by-level format.
+     */
     void printBtree() const {
-        // 使用佇列實現層次遍歷
+        // Use a queue to implement level-order traversal
         std::vector<std::pair<BTreeNode<T>*, int>> queue;
-        queue.emplace_back(root_, 1); // 從根節點（高度 1）開始
+        queue.emplace_back(root_, 1);  // Start from the root node (height 1)
     
         while (!queue.empty()) {
-            BTreeNode<T>* node = queue.front().first;  // 目前處理的節點
-            int level = queue.front().second;         // 該節點的高度
+            BTreeNode<T>* node = queue.front().first;  // The current node being processed
+            int level = queue.front().second;          // The height of the current node
             queue.erase(queue.begin());
     
-            // 在每個節點前顯示它的高度 level
+            // Display the level of each node
             std::cout << "Level " << level << ": { ";
     
-            // 如果節點有鍵，遍歷顯示
+            // If the node has keys, iterate and display them
             if (!node->keys.empty()) {
                 for (size_t i = 0; i < node->keys.size(); ++i) {
                     std::cout << "[" << node->keys[i] << ": (";
-                    // 如果節點有資料，遍歷顯示資料
+                    // If the node has data, iterate and display the data
                     if (!node->data[i].empty()) {
                         for (size_t j = 0; j < node->data[i].size(); ++j) {
                             std::cout << node->data[i][j];
@@ -136,13 +178,13 @@ public:
                     }
                     std::cout << ")]";
                     if (i != node->keys.size() - 1) {
-                        std::cout << ", "; // 鍵值之間的逗號分隔
+                        std::cout << ", ";  // Separator between keys
                     }
                 }
             }
             std::cout << " }" << std::endl;
     
-            // 將子節點加入佇列，並更新高度 (level + 1)
+            // Add child nodes to the queue and update the height (level + 1)
             for (BTreeNode<T>* child : node->children) {
                 queue.emplace_back(child, level + 1);
             }
@@ -150,55 +192,63 @@ public:
     }    
 
 private:
-    int order_; // 樹的階數，決定每個節點的最大鍵值數量
-    int maxKeys_; // 根據模式取得最大鍵值數量
-    std::string mode_;
-    std::string sort_type_; // 排序類型 ("lexicographic" 或 "numeric")
-    BTreeNode<T>* root_; // 樹的根節點指標
+    int order_;              // The order of the tree.
+    int maxKeys_;            // Maximum number of keys a node can hold.
+    std::string mode_;       // Mode of the tree ("B-tree" or "2-3 tree").
+    std::string sort_type_;  // Sorting type ("lexicographic" or "numeric").
+    BTreeNode<T>* root_;     // Pointer to the root node.
 
-    // 根據模式返回節點的最大鍵值數量
+    /**
+     * @brief Determines the maximum number of keys based on the tree mode.
+     * 
+     * @return The maximum number of keys per node.
+     */
     int getMaxKeys() const {
         if (mode_ == "2-3 tree") {
-            return 2; // 2-3 tree 的節點最多 2 個鍵值
+            return 2;  // In a 2-3 tree, each node can hold a maximum of 2 keys
         }
-        return 2 * order_ - 1; // 一般 B-tree
+        return 2 * order_ - 1;  // For a standard B-tree
     }
 
-    // 插入內部函式
-    // 遞迴將鍵值插入到適當的節點位置
-    // 插入內部函式
-    // 遞迴將鍵值插入到適當的節點位置
+    /**
+     * @brief Internal method to insert a key-value pair into the appropriate node.
+     * 
+     * @param node The current node to insert the key.
+     * @param key The key to insert.
+     * @param data The data associated with the key.
+     * @param maxKeys The maximum number of keys a node can have.
+     */
     void insertInternal(BTreeNode<T>* node, const std::string& key, const T& data, int maxKeys_) {
         if (node->children.empty()) {
-            // 葉節點
+            // Leaf node
             int index = getChildIndex(node, key);
             if (index < node->keys.size() && node->keys[index] == key) {
-                node->data[index].push_back(data); // 如果 key 存在，直接追加 data
+                node->data[index].push_back(data);  // If the key exists, just append the data
             } else {
                 node->keys.insert(node->keys.begin() + index, key);
                 node->data.insert(node->data.begin() + index, std::vector<T>{data});
             }
         } else {
-            // 非葉節點
+            // Internal node
             int index = getChildIndex(node, key);
             if (index < node->keys.size() && node->keys[index] == key) {
-                // 如果非葉節點中已存在相同的 key，直接追加 data
+                // If the key exists in an internal node, just append the data
                 node->data[index].push_back(data);
             } else {
-                // 遞迴插入至子節點
+                // Recursively insert into the child node
                 insertInternal(node->children[index], key, data, maxKeys_);
     
-                // 如果子節點分裂，檢查是否需要進一步處理
+                // If the child node splits, check if further handling is needed
                 if (node->children[index]->keys.size() > maxKeys_) {
                     split(node, index, maxKeys_);
                     if (compare(node->keys[index], key) < 0) {
-                        ++index; // 更新索引，確保插入到正確的子節點中
+                        ++index;  // Update index to ensure insertion goes to the correct child node
                     }
                 }
             }
         }
     
-        // 更新節點高度
+        // Update node height
         if (mode_ == "2-3 tree") {
             node->height = 1 + (node->children.empty() ? 0 : node->children[0]->height);
         } else {
@@ -206,119 +256,175 @@ private:
         }
     }    
 
-    // 分裂節點函式
-    // 將已滿的節點分裂為兩個節點，並將中間鍵值提升到父節點
-    // 分裂節點函式
+    /**
+     * @brief Splits a node that has exceeded the maximum number of keys.
+     * 
+     * @param parent The parent node where the split should be registered.
+     * @param index The index of the child node being split.
+     * @param maxKeys The maximum number of keys per node.
+     */
     void split(BTreeNode<T>* parent, int index, int maxKeys_) {
         BTreeNode<T>* nodeToSplit = parent->children[index];
         BTreeNode<T>* newNode = new BTreeNode<T>();
     
-        int mid = maxKeys_ / 2;  // 對於 2-3 Tree, maxKeys_ 是 2，所以 mid = 1
+        int mid = maxKeys_ / 2;  // For a 2-3 Tree, maxKeys_ is 2, so mid = 1
     
-        // 確保在 2-3 Tree 模式中，maxKeys_ 必須是 2
+        // Ensure that in 2-3 Tree mode, maxKeys_ must be 2
         if (mode_ == "2-3 tree" && maxKeys_ != 2) {
             delete newNode;
-            std::cerr << "錯誤：在 2-3 tree 模式下，maxKeys_ 必須是 2！" << std::endl;
+            std::cerr << "Error: In 2-3 tree mode, maxKeys_ must be 2!" << std::endl;
             return;
         }
     
-        // 將中間鍵值提升到父節點
+        // Promote the middle key to the parent node
         const std::string& midKey = nodeToSplit->keys[mid];
         auto& midData = nodeToSplit->data[mid];
     
         parent->keys.insert(parent->keys.begin() + index, midKey);
         parent->data.insert(parent->data.begin() + index, midData);
     
-        // 將右半部分鍵值與資料分配給新節點
+        // Move the right half of the keys and data to the new node
         newNode->keys.assign(nodeToSplit->keys.begin() + mid + 1, nodeToSplit->keys.end());
         newNode->data.assign(nodeToSplit->data.begin() + mid + 1, nodeToSplit->data.end());
     
-        // 移除已經移動的鍵值與資料
+        // Remove the moved keys and data
         nodeToSplit->keys.resize(mid);
         nodeToSplit->data.resize(mid);
     
-        // 如果不是葉節點，處理子節點
+        // If it's not a leaf node, handle child nodes
         if (!nodeToSplit->children.empty()) {
             newNode->children.assign(nodeToSplit->children.begin() + mid + 1, nodeToSplit->children.end());
             nodeToSplit->children.resize(mid + 1);
         }
     
-        // 將新節點插入父節點的子節點中
+        // Insert the new node into the parent's child nodes
         parent->children.insert(parent->children.begin() + index + 1, newNode);
     
-        // 更新父節點的高度
+        // Update the height of the parent node
         parent->height = std::max(parent->children[index]->height, parent->children[index + 1]->height) + 1;
     }     
     
 
 
-    // 找出鍵值應插入的子節點索引
+    /**
+     * @brief Finds the index of the child node where the key should be inserted.
+     * 
+     * @param node The current node.
+     * @param key The key to insert.
+     * @return The index of the child node.
+     */
     int getChildIndex(BTreeNode<T>* node, const std::string& key) const {
-        int i = 0;
-        // 使用比較函式比較鍵值
-        while (i < node->keys.size() && compare(node->keys[i], key) < 0) {
-            if (compare(node->keys[i], key) == 0) return i; // 返回相同鍵值的索引
-            ++i;
+        int index = 0;
+        // Use the comparison function to compare the keys
+        while (index < node->keys.size() && compare(node->keys[index], key) < 0) {
+            if (compare(node->keys[index], key) == 0) return index;  // Return the index of the existing key
+            ++index;
         }
     
-        return i;  // 返回插入的位置
+        return index;  // Return the index for insertion
     }    
 
-    // 比較函式，根據排序方式選擇字典排序或數字排序
+    /**
+     * @brief Compares two keys based on the specified sorting type.
+     * 
+     * @param a The first key.
+     * @param b The second key.
+     * @return A negative value if a < b, zero if a == b, and a positive value if a > b.
+     */
     int compare(const std::string& a, const std::string& b) const {
         if (sort_type_ == "numeric") {
-            // 嘗試將字串轉為數字來進行比較
+            // Attempt to convert the strings to numbers for comparison
             try {
                 int num_a = std::stoi(a);
                 int num_b = std::stoi(b);
                 return num_a - num_b;
             } catch (const std::invalid_argument&) {
-                // 如果轉換失敗，回傳 0，避免出錯
+                // If conversion fails, return 0 to avoid errors
                 return a.compare(b);
             }
         } else {
-            // 默認使用字典排序
-            // a < b return -1
-            return a.compare(b);
+            // Default to lexicographical comparison
+            return a.compare(b);  // a < b returns -1
         }
     }
 };
 
+
+/**
+ * @class AVLTreeNode
+ * @brief Represents a node in an AVL Tree.
+ * 
+ * An AVL tree node contains a key, associated data, pointers to left and right children, and the height of the node.
+ * 
+ * @tparam T The type of data stored in the node.
+ */
 template <typename T>
 class AVLTreeNode {
 public:
-    std::string key;  // 鍵值
-    std::vector<T> data;  // 對應資料
-    AVLTreeNode* left;  // 左子節點
-    AVLTreeNode* right;  // 右子節點
-    int height;  // 樹的高度
+    std::string key;      // The key for this node.
+    std::vector<T> data;  // The data associated with the key.
+    AVLTreeNode* left;    // Pointer to the left child.
+    AVLTreeNode* right;   // Pointer to the right child.
+    int height;           // The height of the node.
 
-    // 預設建構子
+    /**
+     * @brief Constructs a new AVLTreeNode with the given key and data.
+     * 
+     * @param key The key for this node.
+     * @param data The data associated with the key.
+     */
     AVLTreeNode(const std::string& key, const T& data)
         : key(key), data({data}), left(nullptr), right(nullptr), height(1) {}
 
-    // 解構子
+    /**
+     * @brief Destructor for AVLTreeNode.
+     */
     ~AVLTreeNode() {
         left = nullptr;
         right = nullptr;
     }
 };
 
+/**
+ * @class AVLTree
+ * @brief Represents an AVL Tree, a self-balancing binary search tree.
+ * 
+ * An AVL tree is a binary search tree (BST) where the difference between the heights of the left and right subtrees
+ * cannot be more than one for all nodes. If this property is violated, rotations are performed to restore balance.
+ * 
+ * @tparam T The type of data stored in the tree nodes.
+ */
 template <typename T>
 class AVLTree {
 public:
+    /**
+     * @brief Constructs an AVL Tree with a specified sorting type.
+     * 
+     * @param sort_type The sorting type, either "lexicographic" or "numeric". Default is "lexicographic".
+     */
     explicit AVLTree(const std::string& sort_type = "lexicographic")
         : sort_type_(sort_type), root_(nullptr) {}
-
+    
+    /**
+     * @brief Destructor to clear the tree and free memory.
+     */
     ~AVLTree() {
         clear();
     }
 
+    /**
+     * @brief Clears the entire tree by deleting all nodes.
+     */    
     void clear() {
         clearInternal(root_);
         root_ = nullptr;
     }
 
+    /**
+     * @brief Internal function to recursively clear nodes starting from the given node.
+     * 
+     * @param node The node to clear.
+     */
     void clearInternal(AVLTreeNode<T>* node) {
         if (node == nullptr) return;
 
@@ -327,20 +433,40 @@ public:
         delete node;  // Only delete the node once
     }
 
+    /**
+     * @brief Checks if the tree is empty (root is null).
+     * 
+     * @return True if the tree is empty, false otherwise.
+     */
     bool isEmpty() const {
         return root_ == nullptr;
     }
 
-    // 插入函式
+    /**
+     * @brief Inserts a new key-value pair into the AVL Tree while maintaining balance.
+     * 
+     * @param key The key to insert.
+     * @param data The data associated with the key.
+     */
     void insert(const std::string& key, const T& data) {
         root_ = insertInternal(root_, key, data);
     }
 
-    // 取得樹根
+    /**
+     * @brief Retrieves the root of the tree.
+     * 
+     * @return A pointer to the root node.
+     */
     AVLTreeNode<T>* getRoot() const {
         return root_;
     }
 
+    /**
+     * @brief Retrieves the data of the root node.
+     * 
+     * @return A vector of data from the root node.
+     * @throws std::runtime_error If the tree is empty.
+     */
     std::vector<T> getRootData() const {
         if (root_ == nullptr) {
             throw std::runtime_error("Tree root is null");
@@ -348,59 +474,73 @@ public:
         return root_->data;
     }
 
+    /**
+     * @brief Gets the height of the AVL Tree (height of the root node).
+     * 
+     * @return The height of the tree.
+     */
     int getHeight() const {
         return isEmpty() ? 0 : root_->height;
     }
 
-    // 印出樹的結構
+    /**
+     * @brief Prints the structure of the tree in a level-wise manner.
+     */
     void printTree() const {
         printTreeInternal(root_, 0);
     }
 
 private:
-    std::string sort_type_;  // 排序類型 ("lexicographic" 或 "numeric")
-    AVLTreeNode<T>* root_;  // 樹的根節點
+    std::string sort_type_;  // The sorting type of the tree ("lexicographic" or "numeric").
+    AVLTreeNode<T>* root_;   // Pointer to the root node of the AVL Tree.
 
-    // 插入內部函式，保持樹的平衡
+    /**
+     * @brief Internal function that inserts a key-value pair into the tree while maintaining balance.
+     * 
+     * @param node The current node to insert the key-value pair.
+     * @param key The key to insert.
+     * @param data The data associated with the key.
+     * @return The updated node after insertion.
+     */
     AVLTreeNode<T>* insertInternal(AVLTreeNode<T>* node, const std::string& key, const T& data) {
         if (node == nullptr) {
-            return new AVLTreeNode<T>(key, data);  // 創建新節點
+            return new AVLTreeNode<T>(key, data);  // Create a new node
         }
 
-        // 標準的二叉搜尋樹插入
+        // Standard BST insertion
         if (compare(key, node->key) < 0) {
             node->left = insertInternal(node->left, key, data);
         } else if (compare(key, node->key) > 0) {
             node->right = insertInternal(node->right, key, data);
         } else {
-            // 如果相同鍵值存在，直接新增資料
+            // If key is already present, append the new data
             node->data.push_back(data);
             return node;
         }
 
-        // 更新節點高度
+        // Update height of this ancestor node
         node->height = 1 + std::max(getHeight(node->left), getHeight(node->right));
 
-        // 計算平衡因子並進行旋轉
+        // Get the balance factor and balance the tree
         int balance = getBalance(node);
 
-        // 左左情況
+        // Left Left case
         if (balance > 1 && compare(key, node->left->key) < 0) {
             return rightRotate(node);
         }
 
-        // 右右情況
+        // Right Right case
         if (balance < -1 && compare(key, node->right->key) > 0) {
             return leftRotate(node);
         }
 
-        // 左右情況
+        // Left Right case
         if (balance > 1 && compare(key, node->left->key) > 0) {
             node->left = leftRotate(node->left);
             return rightRotate(node);
         }
 
-        // 右左情況
+        // Right Left case
         if (balance < -1 && compare(key, node->right->key) < 0) {
             node->right = rightRotate(node->right);
             return leftRotate(node);
@@ -409,39 +549,54 @@ private:
         return node;
     }
 
-    // 左旋轉操作
+    /**
+     * @brief Performs a left rotation on the given node.
+     * 
+     * @param x The node to rotate.
+     * @return The new root of the rotated subtree.
+     */
     AVLTreeNode<T>* leftRotate(AVLTreeNode<T>* x) {
         AVLTreeNode<T>* y = x->right;
         AVLTreeNode<T>* T2 = y->left;
 
-        // 進行旋轉
+        // Perform rotation
         y->left = x;
         x->right = T2;
 
-        // 更新高度
+        // Update heights
         x->height = 1 + std::max(getHeight(x->left), getHeight(x->right));
         y->height = 1 + std::max(getHeight(y->left), getHeight(y->right));
 
-        return y;  // 返回新根
+        return y;  // Return new root
     }
 
-    // 右旋轉操作
+    /**
+     * @brief Performs a right rotation on the given node.
+     * 
+     * @param y The node to rotate.
+     * @return The new root of the rotated subtree.
+     */
     AVLTreeNode<T>* rightRotate(AVLTreeNode<T>* y) {
         AVLTreeNode<T>* x = y->left;
         AVLTreeNode<T>* T2 = x->right;
 
-        // 進行旋轉
+        // Perform rotation
         x->right = y;
         y->left = T2;
 
-        // 更新高度
+        // Update heights
         y->height = 1 + std::max(getHeight(y->left), getHeight(y->right));
         x->height = 1 + std::max(getHeight(x->left), getHeight(x->right));
 
-        return x;  // 返回新根
+        return x;  // Return new root
     }
 
-    // 取得節點高度
+    /**
+     * @brief Returns the height of the given node.
+     * 
+     * @param node The node to check the height of.
+     * @return The height of the node.
+     */
     int getHeight(AVLTreeNode<T>* node) const {
         if (node == nullptr) {
             return 0;
@@ -449,7 +604,12 @@ private:
         return node->height;
     }
 
-    // 取得節點的平衡因子
+    /**
+     * @brief Returns the balance factor of the given node.
+     * 
+     * @param node The node to check the balance of.
+     * @return The balance factor (height of left subtree - height of right subtree).
+     */
     int getBalance(AVLTreeNode<T>* node) const {
         if (node == nullptr) {
             return 0;
@@ -457,32 +617,42 @@ private:
         return getHeight(node->left) - getHeight(node->right);
     }
 
-    // 比較函式，根據排序方式選擇字典排序或數字排序
+    /**
+     * @brief Compares two keys based on the sorting type.
+     * 
+     * @param a The first key.
+     * @param b The second key.
+     * @return A negative value if a < b, zero if a == b, and a positive value if a > b.
+     */
     int compare(const std::string& a, const std::string& b) const {
         if (sort_type_ == "numeric") {
-            // 嘗試將字串轉為數字來進行比較
+            // Try converting strings to integers for numeric comparison
             try {
                 int num_a = std::stoi(a);
                 int num_b = std::stoi(b);
                 return num_a - num_b;
             } catch (const std::invalid_argument&) {
-                // 如果轉換失敗，回傳 0，避免出錯
+                // If conversion fails, fallback to lexicographic comparison
                 return a.compare(b);
             }
         } else {
-            // 默認使用字典排序
-            // a < b return -1
-            return a.compare(b);
+            // Default lexicographic comparison
+            return a.compare(b);  // a < b return -1
         }
     }
 
-    // 層次遍歷印出樹結構
+    /**
+     * @brief Internal function to print the tree structure level by level.
+     * 
+     * @param node The current node to start printing.
+     * @param level The current level in the tree.
+     */
     void printTreeInternal(AVLTreeNode<T>* node, int level) const {
         if (node == nullptr) {
             return;
         }
 
-        // 印出當前層次的節點
+        // Print the current level's node
         std::cout << "Level " << level << ": { " << node->key << ": [";
         for (size_t i = 0; i < node->data.size(); ++i) {
             std::cout << node->data[i];
@@ -492,7 +662,7 @@ private:
         }
         std::cout << "] }" << std::endl;
 
-        // 遞迴印出左右子樹
+        // Recursively print left and right subtrees
         printTreeInternal(node->left, level + 1);
         printTreeInternal(node->right, level + 1);
     }
@@ -503,74 +673,85 @@ private:
  *
  * @brief Represents graduate information.
  */
-class UniversityDepartment {
-    private:
-    int order;
-    int schoolCode;
-    std::string schoolName;
-    int deptCode;
-    std::string deptName;
-    std::string dayNight;
-    std::string degree;
-    int studentNum;
-    int teacherNum;
-    int graduateNum;
-    std::string city;
-    std::string systemType;
-    
-    public:
-        // Constructor
-        UniversityDepartment(int order, int schoolCode, const std::string& schoolName, int deptCode, const std::string& deptName,
-                             const std::string& dayNight, const std::string& degree, int studentNum, int teacherNum, 
-                             int graduateNum, const std::string& city, const std::string& systemType)
-            : order(order), schoolCode(schoolCode), schoolName(schoolName), deptCode(deptCode), deptName(deptName), 
-              dayNight(dayNight), degree(degree), studentNum(studentNum), teacherNum(teacherNum), 
-              graduateNum(graduateNum), city(city), systemType(systemType) {}
-    
-        // Getters
-        int getOrder() const { return order; }
-        int getSchoolCode() const { return schoolCode; }
-        std::string getSchoolName() const { return schoolName; }
-        int getDeptCode() const { return deptCode; }
-        std::string getDeptName() const { return deptName; }
-        std::string getDayNight() const { return dayNight; }
-        std::string getDegree() const { return degree; }
-        int getStudentNum() const { return studentNum; }
-        int getTeacherNum() const { return teacherNum; }
-        int getGraduateNum() const { return graduateNum; }
-        std::string getCity() const { return city; }
-        std::string getSystemType() const { return systemType; }
-    
-        // Setters
-        void setOrder(int orderVal) { order = orderVal; }
-        void setSchoolCode(int schoolCodeVal) { schoolCode = schoolCodeVal; }
-        void setSchoolName(const std::string& schoolNameVal) { schoolName = schoolNameVal; }
-        void setDeptCode(int deptCodeVal) { deptCode = deptCodeVal; }
-        void setDeptName(const std::string& deptNameVal) { deptName = deptNameVal; }
-        void setDayNight(const std::string& dayNightVal) { dayNight = dayNightVal; }
-        void setDegree(const std::string& degreeVal) { degree = degreeVal; }
-        void setStudentNum(int studentNumVal) { studentNum = studentNumVal; }
-        void setTeacherNum(int teacherNumVal) { teacherNum = teacherNumVal; }
-        void setGraduateNum(int graduateNumVal) { graduateNum = graduateNumVal; }
-        void setCity(const std::string& cityVal) { city = cityVal; }
-        void setSystemType(const std::string& systemTypeVal) { systemType = systemTypeVal; }
-};
+ class UniversityDepartment {
+private:
+    int order_;
+    int school_code_;
+    std::string school_name_;
+    int dept_code_;
+    std::string dept_name_;
+    std::string day_night_;
+    std::string degree_;
+    int student_num_;
+    int teacher_num_;
+    int graduate_num_;
+    std::string city_;
+    std::string system_type_;
+
+public:
+    // Constructor.
+    UniversityDepartment(int order, int school_code, const std::string& school_name, int dept_code,
+                        const std::string& dept_name, const std::string& day_night,
+                        const std::string& degree, int student_num, int teacher_num,
+                        int graduate_num, const std::string& city, const std::string& system_type)
+        : order_(order),
+        school_code_(school_code),
+        school_name_(school_name),
+        dept_code_(dept_code),
+        dept_name_(dept_name),
+        day_night_(day_night),
+        degree_(degree),
+        student_num_(student_num),
+        teacher_num_(teacher_num),
+        graduate_num_(graduate_num),
+        city_(city),
+        system_type_(system_type) {}
+
+    // Getters.
+    int getOrder() const { return order_; }
+    int getSchoolCode() const { return school_code_; }
+    const std::string& getSchoolName() const { return school_name_; }
+    int getDeptCode() const { return dept_code_; }
+    const std::string& getDeptName() const { return dept_name_; }
+    const std::string& getDayNight() const { return day_night_; }
+    const std::string& getDegree() const { return degree_; }
+    int getStudentNum() const { return student_num_; }
+    int getTeacherNum() const { return teacher_num_; }
+    int getGraduateNum() const { return graduate_num_; }
+    const std::string& getCity() const { return city_; }
+    const std::string& getSystemType() const { return system_type_; }
+
+    // Setters.
+    void setOrder(int order) { order_ = order; }
+    void setSchoolCode(int school_code) { school_code_ = school_code; }
+    void setSchoolName(const std::string& school_name) { school_name_ = school_name; }
+    void setDeptCode(int dept_code) { dept_code_ = dept_code; }
+    void setDeptName(const std::string& dept_name) { dept_name_ = dept_name; }
+    void setDayNight(const std::string& day_night) { day_night_ = day_night; }
+    void setDegree(const std::string& degree) { degree_ = degree; }
+    void setStudentNum(int student_num) { student_num_ = student_num; }
+    void setTeacherNum(int teacher_num) { teacher_num_ = teacher_num; }
+    void setGraduateNum(int graduate_num) { graduate_num_ = graduate_num; }
+    void setCity(const std::string& city) { city_ = city; }
+    void setSystemType(const std::string& system_type) { system_type_ = system_type; }
+};   
 
 /**
  * @brief Removes all non-numeric characters from the given string.
  * 
- * @param str The input string to be cleaned.
+ * @param input_string The input string to be cleaned.
  * @return A string containing only the numeric characters from the input string.
  */
-std::string removeNonNumeric(const std::string& str) {
-    std::string cleanedStr;
-    for (const char& c : str) {
-        if (std::isdigit(c)) {
-            cleanedStr += c;
+std::string removeNonNumeric(const std::string& input_string) {
+    std::string cleaned_string;
+    for (const char& character : input_string) {
+        if (std::isdigit(character)) {
+            cleaned_string += character;
         }
     }
-    return cleanedStr;
+    return cleaned_string;
 }
+
 
 /**
  * @brief Reads graduate data from a tab-separated file.
@@ -587,86 +768,69 @@ std::string removeNonNumeric(const std::string& str) {
  * - The first line of the file is assumed to be a header and is skipped.
  * - If a row is invalid, it will be ignored.
  */
- bool ReadFile(const std::string& inputFileName, std::vector<UniversityDepartment>& graduateInfoList){
-    std::ifstream inputFile(inputFileName);
+bool ReadFile(const std::string& input_file_name, std::vector<UniversityDepartment>& graduate_info_list) {
+    std::ifstream input_file(input_file_name);
 
-    // Make sure file exist.
-    if (!inputFile.is_open()) {
+    // Make sure file exists.
+    if (!input_file.is_open()) {
         std::cout << std::endl;
-        std::cout << "### " << inputFileName << " does not exist! ###" << std::endl;
+        std::cout << "### " << input_file_name << " does not exist! ###" << std::endl;
         std::cout << std::endl;
 
         // File can't be opened.
         return false;
     }
 
-    // Skip head of three lines.
-    std::string headerLine;
+    // Skip the first three lines (header).
+    std::string header_line;
     for (int i = 0; i < 3; ++i) {
-        std::getline(inputFile, headerLine);
+        std::getline(input_file, header_line);
     }
-    
-    // Get data.
+
+    // Parse data from the file.
     std::string line;
     int order = 0;
-    while (std::getline(inputFile, line)) {
+    while (std::getline(input_file, line)) {
         std::istringstream line_stream(line);
-        std::vector<std::string> graduateInformationParam;
+        std::vector<std::string> graduate_information_param;
         std::string token;
 
-        // Separate the data by "Tab".
+        // Separate the data by tabs.
         while (std::getline(line_stream, token, '\t')) {
-            graduateInformationParam.push_back(token);
+            graduate_information_param.push_back(token);
         }
 
-        // TODO: When the format does not meet the need(TSV) to throw an exception.
-        // TODO: If the number of graduateInformationParam is not equal to the expected value, 
-        //       it should be skipped instead of allowing the line that failed to parse to enter.
-        // Make sure have data.
-        if (graduateInformationParam.size() != 0) {
-            ++order;
-            int schoolCode = stoi(removeNonNumeric(graduateInformationParam[0]));
-            std::string schoolName = graduateInformationParam[1];
-            int deptCode = stoi(removeNonNumeric(graduateInformationParam[2]));
-            std::string deptName = graduateInformationParam[3];
-            std::string dayNight = graduateInformationParam[4];
-            std::string degree = graduateInformationParam[5];
-            int studentNum = stoi(removeNonNumeric(graduateInformationParam[6]));
-            int teacherNum = stoi(removeNonNumeric(graduateInformationParam[7]));
-            int graduateNum = stoi(removeNonNumeric(graduateInformationParam[8]));
-            std::string city = graduateInformationParam[9];
-            std::string systemType = graduateInformationParam[10];
+        // TODO: When the format does not meet the need (TSV), throw an exception.
+        // TODO: If the number of graduate_information_param is not equal to the expected value,
+        //       skip the line instead of allowing it to be processed.
 
-            // Create and store the graduateInformation.
-            UniversityDepartment graduateInfo(order, schoolCode, schoolName, deptCode, deptName, dayNight, degree, studentNum, teacherNum, graduateNum, city, systemType);
-            graduateInfoList.push_back(graduateInfo);
+        // Make sure data exists.
+        if (!graduate_information_param.empty()) {
+            ++order;
+            int school_code = stoi(removeNonNumeric(graduate_information_param[0]));
+            std::string school_name = graduate_information_param[1];
+            int dept_code = stoi(removeNonNumeric(graduate_information_param[2]));
+            std::string dept_name = graduate_information_param[3];
+            std::string day_night = graduate_information_param[4];
+            std::string degree = graduate_information_param[5];
+            int student_num = stoi(removeNonNumeric(graduate_information_param[6]));
+            int teacher_num = stoi(removeNonNumeric(graduate_information_param[7]));
+            int graduate_num = stoi(removeNonNumeric(graduate_information_param[8]));
+            std::string city = graduate_information_param[9];
+            std::string system_type = graduate_information_param[10];
+
+            // Create and store the graduate information.
+            UniversityDepartment graduate_info(order, school_code, school_name, dept_code, dept_name,
+                                               day_night, degree, student_num, teacher_num,
+                                               graduate_num, city, system_type);
+            graduate_info_list.push_back(graduate_info);
         }
     }
 
-    inputFile.close();
+    input_file.close();
 
-    // Opened file success.
+    // File opened and processed successfully.
     return true;
-}
-
-/**
- * @brief Sorts a vector of graduate objects by their school code values in descending order.
- *
- * If two graduate have the same school code, they are sorted by their index in ascending order.
- *
- * @param graduateInfoList A reference to a vector of graduate objects to be sorted.
- *
- * @details
- * - This function uses `std::sort` with a custom comparison lambda function.
- * - Sorting is performed in-place, modifying the original vector.
- * - Lower school code values appear first.
- */
- void sortGraduateInfoList(std::vector<UniversityDepartment>& graduateInfoList) {
-    std::sort(graduateInfoList.begin(), graduateInfoList.end(),
-        [](const UniversityDepartment& a, const UniversityDepartment& b) {
-            return a.getSchoolCode() < b.getSchoolCode();
-        }
-    );
 }
 
 /**
@@ -674,66 +838,83 @@ std::string removeNonNumeric(const std::string& str) {
  * 
  * @param graduateInfoList The list of university department data to print.
  */
-void printSaveData(const std::vector<UniversityDepartment>& graduateInfoList, const std::vector<int>& order) {
-    for (int i = 0; i < order.size(); ++i) {
-        int index = order[i];
-        UniversityDepartment graduateInfo = graduateInfoList[index - 1];
+void printSaveData(const std::vector<UniversityDepartment>& graduate_info_list, const std::vector<int>& order) {
+    std::vector<int> sorted_order = order;  // Create a copy of the order.
+    std::sort(sorted_order.begin(), sorted_order.end());  // Sort the copy.
 
+    for (size_t i = 0; i < sorted_order.size(); ++i) {
+        int index = sorted_order[i];
+        if (index - 1 < 0 || index - 1 >= graduate_info_list.size()) {
+            std::cerr << "Index out of range: " << index << std::endl;
+            continue;  // Skip invalid indices.
+        }
+
+        UniversityDepartment graduate_info = graduate_info_list[index - 1];
         std::cout << i + 1 << ": "
-                  << "[" << graduateInfo.getOrder() << "]" << " "
-                  << graduateInfo.getSchoolName() << ", "
-                  << graduateInfo.getDeptName() << ", "
-                  << graduateInfo.getDayNight() << ", "
-                  << graduateInfo.getDegree() << ", "
-                  << graduateInfo.getStudentNum()
+                  << "[" << graduate_info.getOrder() << "] "
+                  << graduate_info.getSchoolName() << ", "
+                  << graduate_info.getDeptName() << ", "
+                  << graduate_info.getDayNight() << ", "
+                  << graduate_info.getDegree() << ", "
+                  << graduate_info.getStudentNum()
                   << std::endl;
-                  
     }
-    
+
     std::cout << std::endl;
 }
 
-/** @brief Processes graduate data using a min heap. */
-void Task1(std::vector<UniversityDepartment>& graduateInfoList, BTree<int>& graduateInfo) {
-    if (!graduateInfoList.empty()) {
-        graduateInfoList.clear();
-        graduateInfo.clear();
+/**
+ * @brief Task 1: Builds a 2-3 tree from the provided file input.
+ * 
+ * This function will ask the user for the input file name, read data from it, and build a 2-3 tree (BTree).
+ * It will print debug information for each insertion and the final tree structure. 
+ * After building the tree, it will output the tree height and other relevant data.
+ * 
+ * @param graduate_info_list A vector that stores information about the graduate departments.
+ * @param graduate_info The 2-3 tree (BTree) to store the department data.
+ */
+void Task1(std::vector<UniversityDepartment>& graduate_info_list, BTree<int>& graduate_info) {
+    // If there is any existing data, clear both the list and the tree
+    if (!graduate_info_list.empty()) {
+        graduate_info_list.clear();
+        graduate_info.clear();
     }
 
-    // Continue to ask the user to enter the file number until the user chooses to exit.
+    // Continue to ask the user to enter the file number until they choose to exit.
     while (true) {
-        std::string inputFileName = "";
+        std::string input_file_name = "";
 
         std::cout << "Input a file number ([0] Quit): ";
-        std::cin >> inputFileName;
+        std::cin >> input_file_name;
 
-        if ("0" == inputFileName) {
-            return; // Exit if the user enters 0.
+        if ("0" == input_file_name) {
+            return;  // Exit if the user enters 0.
         } else {
-            inputFileName = "input" + inputFileName + ".txt";
+            input_file_name = "input" + input_file_name + ".txt";
 
             // Try to open the file.
-            // If fail, enter the file name again.
-            if (!ReadFile(inputFileName, graduateInfoList)) continue;
+            // If it fails, prompt for the file name again.
+            if (!ReadFile(input_file_name, graduate_info_list)) continue;
 
             // Check if the file contains any data.
-            if(!graduateInfoList.empty()) {
-                break; // Read data success, jump out the loop.
+            if (!graduate_info_list.empty()) {
+                break;  // Successfully read data, exit the loop.
             } else {
                 std::cout << std::endl;
-                std::cout << "### Get nothing from the file "<< inputFileName <<" ! ###" << std::endl;
+                std::cout << "### Get nothing from the file " << input_file_name << " ! ###" << std::endl;
                 return;
             }
         }
     }
 
+    // Debug mode: Print the contents of the graduate_info_list
     #ifdef DEBUG
-        for (int i = 0; i < graduateInfoList.size(); ++i) {
-            UniversityDepartment temp = graduateInfoList[i];
+        for (int i = 0; i < graduate_info_list.size(); ++i) {
+            UniversityDepartment temp = graduate_info_list[i];
 
             std::cout << i + 1 << ": "
-                      << "[" << temp.getOrder() << "]" << " "
-                      << temp.getSchoolName() << ", "
+                      << "[" << temp.getOrder() << "]"
+                      << " " << temp.getSchoolName() << ", "
                       << temp.getDeptName() << ", "
                       << temp.getDayNight() << ", "
                       << temp.getDegree() << ", "
@@ -745,56 +926,76 @@ void Task1(std::vector<UniversityDepartment>& graduateInfoList, BTree<int>& grad
     #endif
 
     // Build 2-3 tree.
-    for (const UniversityDepartment& info : graduateInfoList) {
-        graduateInfo.insert(info.getSchoolName(), info.getOrder());
-        
+    for (const UniversityDepartment& info : graduate_info_list) {
+        graduate_info.insert(info.getSchoolName(), info.getOrder());
+
+        // Debug mode: Print the current state of the tree after each insertion
         #ifdef DEBUG
             std::cout << "   ===   \n";
-            graduateInfo.printBtree();
+            graduate_info.printBtree();
             std::cout << "   ===   \n";
         #endif
     }
 
+    // Debug mode: Print the final state of the tree and the root data
     #ifdef DEBUG
         std::cout << "   ===   \n";
-        graduateInfo.printBtree();
+        graduate_info.printBtree();
         std::cout << "   ===   \n";
-        for (const auto& info : graduateInfo.getRootData()) {
+        for (const auto& info : graduate_info.getRootData()) {
             std::cout << info << ", \n";
         }
     #endif
 
     // Output information.
-    std::cout << "Tree height = " << graduateInfo.getHeight() << std::endl;
-    printSaveData(graduateInfoList, graduateInfo.getRootData());
+    std::cout << "Tree height = " << graduate_info.getHeight() << std::endl;
+    printSaveData(graduate_info_list, graduate_info.getRootData());
 }
 
-/** @brief Processes graduate data using a deap. */
-void Task2(std::vector<UniversityDepartment>& graduateInfoList, AVLTree<int>& graduateInfo) {
-    if (!graduateInfo.isEmpty()) {
+/**
+ * @brief Task 2: Builds an AVL tree from the provided department information.
+ * 
+ * This function builds an AVL tree if it hasn't been created already. It checks if the tree is empty and inserts data.
+ * After the tree is built, it outputs the tree height and relevant data.
+ * 
+ * @param graduate_info_list A vector containing the department information.
+ * @param graduate_info The AVL tree to store the department data.
+ */
+void Task2(std::vector<UniversityDepartment>& graduate_info_list, AVLTree<int>& graduate_info) {
+    if (!graduate_info.isEmpty()) {
         std::cout << "### AVL tree has been built. ###\n";
     } else {
-        // Build AVLtree.
-        for (const UniversityDepartment& info : graduateInfoList) {
-            graduateInfo.insert(info.getDeptName(), info.getOrder());
+        // Build AVL tree.
+        for (const UniversityDepartment& info : graduate_info_list) {
+            graduate_info.insert(info.getDeptName(), info.getOrder());
         }
     }
 
     // Output information.
-    std::cout << "Tree height = " << graduateInfo.getHeight() << std::endl;
-    printSaveData(graduateInfoList, graduateInfo.getRootData());
+    std::cout << "Tree height = " << graduate_info.getHeight() << std::endl;
+    printSaveData(graduate_info_list, graduate_info.getRootData());
 }
 
+/**
+ * @brief Main function to drive the program logic.
+ * 
+ * The main function provides a menu for the user to select operations. It handles task selection, builds the appropriate tree
+ * (2-3 tree or AVL tree), and displays relevant information about the trees. 
+ * The user can keep choosing options until they select to quit (option 0).
+ * 
+ * @return int Returns 0 on successful execution.
+ */
 int main() {
     int select_command = 0;
     int select_lower_bound = 0;
     int select_upper_bound = 2;
-    std::vector<UniversityDepartment> graduateInfoList;
-    BTree<int> graduateInfoBTreeOrder3(3, "2-3 tree", "lexicographic");
-    AVLTree<int> graduateInfoAVL("lexicographic");
+    std::vector<UniversityDepartment> graduate_info_list;
+    BTree<int> graduate_info_b_tree_order_3(3, "2-3 tree", "lexicographic");
+    AVLTree<int> graduate_info_avl("lexicographic");
 
     do {
         while (true) {
+            // Display the menu options for the user
             std::cout <<
                 "*** Search Tree Utilities **\n"
                 "* 0. QUIT                  *\n"
@@ -805,34 +1006,41 @@ int main() {
 
             std::cin >> select_command;
 
+            // Check if the input is valid
             if (!std::cin.fail()) {
                 break;
             } else {
+                // Handle invalid input
                 std::cin.clear();
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
                 std::cout << std::endl;
                 std::cout << "Command does not exist!\n";
-                std::cout << std::endl;  
+                std::cout << std::endl;
             }
         }
 
+        // Handle the different options based on the user's choice
         switch (select_command) {
         case 0:
             break;
         case 1:
             std::cout << std::endl;
-            Task1(graduateInfoList, graduateInfoBTreeOrder3);
+            // Call Task 1 to build the 2-3 tree
+            Task1(graduate_info_list, graduate_info_b_tree_order_3);
 
-            if (!graduateInfoAVL.isEmpty()) { graduateInfoAVL.clear(); }
+            // If AVL tree has data, clear it before building the new tree
+            if (!graduate_info_avl.isEmpty()) { graduate_info_avl.clear(); }
 
             std::cout << std::endl;
             break;
         case 2:
-            if (graduateInfoList.empty()) {
+            if (graduate_info_list.empty()) {
+                // If no data has been read, prompt the user to choose Task 1 first
                 std::cout << "### Choose 1 first. ###\n";
             } else {
-                Task2(graduateInfoList, graduateInfoAVL);
+                // Call Task 2 to build the AVL tree
+                Task2(graduate_info_list, graduate_info_avl);
             }
 
             std::cout << std::endl;
@@ -842,7 +1050,7 @@ int main() {
             std::cout << "Command does not exist!\n";
             std::cout << std::endl;
         }
-    } while (select_command != 0);
+    } while (select_command != 0); // Continue until the user selects option 0 (quit)
 
     return 0;
 }
