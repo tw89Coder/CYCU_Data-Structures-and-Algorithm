@@ -1,7 +1,7 @@
 /** 
  * @file DS2ex02_27_10927262.cpp
  * @brief A program that uses 2-3 tree and avl tree to manage graduate data.
- * @version 1.0.0
+ * @version 1.0.1
  *
  * @details
  * This program reads and processes graduate data using a tree structure.
@@ -217,6 +217,7 @@ private:
     
         // 確保在 2-3 Tree 模式中，maxKeys_ 必須是 2
         if (mode_ == "2-3 tree" && maxKeys_ != 2) {
+            delete newNode;
             std::cerr << "錯誤：在 2-3 tree 模式下，maxKeys_ 必須是 2！" << std::endl;
             return;
         }
