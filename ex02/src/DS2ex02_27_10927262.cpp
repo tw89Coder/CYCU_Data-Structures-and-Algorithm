@@ -1,7 +1,8 @@
-/** 
+/**
+ * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex02_27_10927262.cpp
  * @brief A program that utilizes 2-3 trees and AVL trees to efficiently manage and organize graduate student data.
- * @version 1.0.4
+ * @version 1.0.5
  *
  * @details
  * This program implements two different tree data structures, 2-3 trees and AVL trees, for storing and managing graduate student data. 
@@ -21,6 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 /**
@@ -34,7 +36,7 @@
  */
 template <typename T>
 class BTreeNode {
-public:
+ public:
     std::vector<std::string> keys;     // A list of keys in the node, kept sorted.
     std::vector<std::vector<T>> data;  // Data corresponding to each key in the node.
     std::vector<BTreeNode*> children;  // List of pointers to child nodes.
@@ -66,7 +68,7 @@ public:
  */
 template <typename T>
 class BTree {
-public:
+ public:
     /**
      * @brief Constructs a BTree with a specified order and sorting mode.
      * 
@@ -74,7 +76,8 @@ public:
      * @param mode The mode of the tree ("B-tree" or "2-3 tree").
      * @param sort_type The type of sorting ("lexicographic" or "numeric").
      */
-    explicit BTree(int order, const std::string& mode = "B-tree", const std::string& sort_type = "lexicographic")
+    explicit BTree(int order, const std::string& mode = "B-tree",
+                   const std::string& sort_type = "lexicographic")
         : order_(order), mode_(mode), sort_type_(sort_type), root_(new BTreeNode<T>) {
         maxKeys_ = getMaxKeys();
     }
@@ -102,15 +105,15 @@ public:
      */
     void insert(const std::string& key, const T& data) {
         insertInternal(root_, key, data, maxKeys_);
-    
+
         if (root_->keys.size() > maxKeys_) {  // Check if outof bounds.
             BTreeNode<T>* temp = root_;
             root_ = new BTreeNode<T>();
             root_->children.push_back(temp);
             split(root_, 0, maxKeys_);
         }
-    }    
-    
+    }
+
     /**
      * @brief Gets the root node of the B-tree.
      * 
@@ -153,15 +156,15 @@ public:
         // Use a queue to implement level-order traversal
         std::vector<std::pair<BTreeNode<T>*, int>> queue;
         queue.emplace_back(root_, 1);  // Start from the root node (height 1)
-    
+
         while (!queue.empty()) {
             BTreeNode<T>* node = queue.front().first;  // The current node being processed
             int level = queue.front().second;          // The height of the current node
             queue.erase(queue.begin());
-    
+
             // Display the level of each node
             std::cout << "Level " << level << ": { ";
-    
+
             // If the node has keys, iterate and display them
             if (!node->keys.empty()) {
                 for (size_t i = 0; i < node->keys.size(); ++i) {
@@ -182,14 +185,14 @@ public:
                 }
             }
             std::cout << " }" << std::endl;
-    
+
             // Add child nodes to the queue and update the height (level + 1)
             std::transform(node->children.begin(), node->children.end(), std::back_inserter(queue),
                [level](BTreeNode<T>* child) { return std::make_pair(child, level + 1); });
         }
-    }    
+    }
 
-private:
+ private:
     int order_;              // The order of the tree.
     int maxKeys_;            // Maximum number of keys a node can hold.
     std::string mode_;       // Mode of the tree ("B-tree" or "2-3 tree").
@@ -235,7 +238,7 @@ private:
             } else {
                 // Recursively insert into the child node
                 insertInternal(node->children[index], key, data, maxKeys_);
-    
+
                 // If the child node splits, check if further handling is needed
                 if (node->children[index]->keys.size() > maxKeys_) {
                     split(node, index, maxKeys_);
@@ -245,14 +248,18 @@ private:
                 }
             }
         }
-    
+
         // Update node height
         if (mode_ == "2-3 tree") {
             node->height = 1 + (node->children.empty() ? 0 : node->children[0]->height);
         } else {
-            node->height = std::max(node->height, (node->children.empty() ? 1 : node->children[0]->height + 1));
+            node->height = std::max(
+                node->height,
+                (node->children.empty()
+                    ? 1
+                    : node->children[0]->height + 1));
         }
-    }    
+    }
 
     /**
      * @brief Splits a node that has exceeded the maximum number of keys.
@@ -264,45 +271,46 @@ private:
     void split(BTreeNode<T>* parent, int index, int maxKeys_) const {
         BTreeNode<T>* nodeToSplit = parent->children[index];
         BTreeNode<T>* newNode = new BTreeNode<T>();
-    
+
         int mid = maxKeys_ / 2;  // For a 2-3 Tree, maxKeys_ is 2, so mid = 1
-    
+
         // Ensure that in 2-3 Tree mode, maxKeys_ must be 2
         if (mode_ == "2-3 tree" && maxKeys_ != 2) {
             delete newNode;
             std::cerr << "Error: In 2-3 tree mode, maxKeys_ must be 2!" << std::endl;
             return;
         }
-    
+
         // Promote the middle key to the parent node
         const std::string& midKey = nodeToSplit->keys[mid];
         auto& midData = nodeToSplit->data[mid];
-    
+
         parent->keys.insert(parent->keys.begin() + index, midKey);
         parent->data.insert(parent->data.begin() + index, midData);
-    
+
         // Move the right half of the keys and data to the new node
         newNode->keys.assign(nodeToSplit->keys.begin() + mid + 1, nodeToSplit->keys.end());
         newNode->data.assign(nodeToSplit->data.begin() + mid + 1, nodeToSplit->data.end());
-    
+
         // Remove the moved keys and data
         nodeToSplit->keys.resize(mid);
         nodeToSplit->data.resize(mid);
-    
+
         // If it's not a leaf node, handle child nodes
         if (!nodeToSplit->children.empty()) {
-            newNode->children.assign(nodeToSplit->children.begin() + mid + 1, nodeToSplit->children.end());
+            newNode->children.assign(
+                nodeToSplit->children.begin() + mid + 1, nodeToSplit->children.end());
+
             nodeToSplit->children.resize(mid + 1);
         }
-    
+
         // Insert the new node into the parent's child nodes
         parent->children.insert(parent->children.begin() + index + 1, newNode);
-    
-        // Update the height of the parent node
-        parent->height = std::max(parent->children[index]->height, parent->children[index + 1]->height) + 1;
-    }     
-    
 
+        // Update the height of the parent node
+        parent->height = std::max(
+            parent->children[index]->height, parent->children[index + 1]->height) + 1;
+    }
 
     /**
      * @brief Finds the index of the child node where the key should be inserted.
@@ -315,12 +323,13 @@ private:
         int index = 0;
         // Use the comparison function to compare the keys
         while (index < node->keys.size() && compare(node->keys[index], key) < 0) {
-            if (compare(node->keys[index], key) == 0) return index;  // Return the index of the existing key
+            // Return the index of the existing key
+            if (compare(node->keys[index], key) == 0) return index;
             ++index;
         }
-    
+
         return index;  // Return the index for insertion
-    }    
+    }
 
     /**
     * @brief Compares two keys based on the sorting type.
@@ -359,7 +368,7 @@ private:
  */
 template <typename T>
 class AVLTreeNode {
-public:
+ public:
     std::string key;      // The key for this node.
     std::vector<T> data;  // The data associated with the key.
     AVLTreeNode* left;    // Pointer to the left child.
@@ -395,7 +404,7 @@ public:
  */
 template <typename T>
 class AVLTree {
-public:
+ public:
     /**
      * @brief Constructs an AVL Tree with a specified sorting type.
      * 
@@ -403,7 +412,7 @@ public:
      */
     explicit AVLTree(const std::string& sort_type = "lexicographic")
         : sort_type_(sort_type), root_(nullptr) {}
-    
+
     /**
      * @brief Destructor to clear the tree and free memory.
      */
@@ -489,7 +498,7 @@ public:
         printTreeInternal(root_, 0);
     }
 
-private:
+ private:
     std::string sort_type_;  // The sorting type of the tree ("lexicographic" or "numeric").
     AVLTreeNode<T>* root_;   // Pointer to the root node of the AVL Tree.
 
@@ -563,8 +572,10 @@ private:
         parent_node->right = left_subtree_of_right_child;
 
         // Update heights
-        parent_node->height = 1 + std::max(getHeight(parent_node->left), getHeight(parent_node->right));
-        right_child->height = 1 + std::max(getHeight(right_child->left), getHeight(right_child->right));
+        parent_node->height = 1 + std::max(
+            getHeight(parent_node->left), getHeight(parent_node->right));
+        right_child->height = 1 + std::max(
+            getHeight(right_child->left), getHeight(right_child->right));
 
         return right_child;  // Return new root
     }
@@ -584,8 +595,10 @@ private:
         parent_node->left = right_subtree_of_left_child;
 
         // Update heights
-        parent_node->height = 1 + std::max(getHeight(parent_node->left), getHeight(parent_node->right));
-        left_child->height = 1 + std::max(getHeight(left_child->left), getHeight(left_child->right));
+        parent_node->height = 1 + std::max(
+            getHeight(parent_node->left), getHeight(parent_node->right));
+        left_child->height = 1 + std::max(
+            getHeight(left_child->left), getHeight(left_child->right));
 
         return left_child;  // Return new root
     }
@@ -673,8 +686,8 @@ private:
  *
  * @brief Represents graduate information.
  */
- class UniversityDepartment {
-private:
+class UniversityDepartment {
+ private:
     int order_;
     int school_code_;
     std::string school_name_;
@@ -688,7 +701,7 @@ private:
     std::string city_;
     std::string system_type_;
 
-public:
+ public:
     // Constructor.
     UniversityDepartment(int order, int school_code, const std::string& school_name, int dept_code,
                         const std::string& dept_name, const std::string& day_night,
@@ -734,7 +747,7 @@ public:
     void setGraduateNum(int graduate_num) { graduate_num_ = graduate_num; }
     void setCity(const std::string& city) { city_ = city; }
     void setSystemType(const std::string& system_type) { system_type_ = system_type; }
-};   
+};
 
 /**
  * @brief Removes all non-numeric characters from the given string.
@@ -768,7 +781,9 @@ std::string removeNonNumeric(const std::string& input_string) {
  * - The first line of the file is assumed to be a header and is skipped.
  * - If a row is invalid, it will be ignored.
  */
-bool ReadFile(const std::string& input_file_name, std::vector<UniversityDepartment>& graduate_info_list) {
+bool ReadFile(const std::string& input_file_name,
+              std::vector<UniversityDepartment>& graduate_info_list) {
+    // Read the file.
     std::ifstream input_file(input_file_name);
 
     // Make sure file exists.
@@ -800,8 +815,10 @@ bool ReadFile(const std::string& input_file_name, std::vector<UniversityDepartme
             graduate_information_param.push_back(token);
         }
 
-        // TODO: When the format does not meet the need (TSV), throw an exception.
-        // TODO: If the number of graduate_information_param is not equal to the expected value,
+        // TODO(10927262):
+        //       When the format does not meet the need (TSV), throw an exception.
+        // TODO(10927262):
+        //       If the number of graduate_information_param is not equal to the expected value,
         //       skip the line instead of allowing it to be processed.
 
         // Make sure data exists.
@@ -820,9 +837,9 @@ bool ReadFile(const std::string& input_file_name, std::vector<UniversityDepartme
             std::string system_type = graduate_information_param[10];
 
             // Create and store the graduate information.
-            UniversityDepartment graduate_info(order, school_code, school_name, dept_code, dept_name,
-                                               day_night, degree, student_num, teacher_num,
-                                               graduate_num, city, system_type);
+            UniversityDepartment graduate_info(order, school_code, school_name, dept_code,
+                                               dept_name, day_night, degree, student_num,
+                                               teacher_num, graduate_num, city, system_type);
             graduate_info_list.push_back(graduate_info);
         }
     }
@@ -838,7 +855,8 @@ bool ReadFile(const std::string& input_file_name, std::vector<UniversityDepartme
  * 
  * @param graduateInfoList The list of university department data to print.
  */
-void printSaveData(const std::vector<UniversityDepartment>& graduate_info_list, const std::vector<int>& order) {
+void printSaveData(const std::vector<UniversityDepartment>& graduate_info_list,
+                   const std::vector<int>& order) {
     std::vector<int> sorted_order = order;  // Create a copy of the order.
     std::sort(sorted_order.begin(), sorted_order.end());  // Sort the copy.
 
@@ -873,7 +891,8 @@ void printSaveData(const std::vector<UniversityDepartment>& graduate_info_list, 
  * @param graduate_info_list A vector that stores information about the graduate departments.
  * @param graduate_info The 2-3 tree (BTree) to store the department data.
  */
-void Task1(std::vector<UniversityDepartment>& graduate_info_list, BTree<int>& graduate_info) {
+void Task1(std::vector<UniversityDepartment>& graduate_info_list,
+           BTree<int>& graduate_info) {
     // If there is any existing data, clear both the list and the tree
     if (!graduate_info_list.empty()) {
         graduate_info_list.clear();
@@ -901,7 +920,8 @@ void Task1(std::vector<UniversityDepartment>& graduate_info_list, BTree<int>& gr
                 break;  // Successfully read data, exit the loop.
             } else {
                 std::cout << std::endl;
-                std::cout << "### Get nothing from the file " << input_file_name << " ! ###" << std::endl;
+                std::cout << "### Get nothing from the file "
+                          << input_file_name << " ! ###" << std::endl;
                 return;
             }
         }
@@ -961,7 +981,8 @@ void Task1(std::vector<UniversityDepartment>& graduate_info_list, BTree<int>& gr
  * @param graduate_info_list A vector containing the department information.
  * @param graduate_info The AVL tree to store the department data.
  */
-void Task2(const std::vector<UniversityDepartment>& graduate_info_list, AVLTree<int>& graduate_info) {
+void Task2(const std::vector<UniversityDepartment>& graduate_info_list,
+           AVLTree<int>& graduate_info) {
     if (!graduate_info.isEmpty()) {
         std::cout << "### AVL tree has been built. ###\n";
     } else {
@@ -1030,7 +1051,9 @@ int main() {
             Task1(graduate_info_list, graduate_info_b_tree_order_3);
 
             // If AVL tree has data, clear it before building the new tree
-            if (!graduate_info_avl.isEmpty()) { graduate_info_avl.clear(); }
+            if (!graduate_info_avl.isEmpty()) {
+                graduate_info_avl.clear();
+            }
 
             std::cout << std::endl;
             break;
@@ -1050,7 +1073,7 @@ int main() {
             std::cout << "Command does not exist!\n";
             std::cout << std::endl;
         }
-    } while (select_command != 0); // Continue until the user selects option 0 (quit)
+    } while (select_command != 0);  // Continue until the user selects option 0 (quit)
 
     return 0;
 }
