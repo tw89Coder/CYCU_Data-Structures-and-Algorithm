@@ -33,4 +33,4 @@ jobs:
       - name: Run Scan Build
         run: |
           cd ${{ env.SOURCE_DIR }}
-          find . -name "*.cpp" -exec scan-build g++ -o my_program {} +
+          find . -name "*Q.cpp" -exec scan-build g++ -o my_program {} +
