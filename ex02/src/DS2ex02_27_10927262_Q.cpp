@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex02_27_10927262.cpp
  * @brief A program that utilizes 2-3 trees and AVL trees to efficiently manage and organize graduate student data.
- * @version 2.0.0
+ * @version 2.0.1
  *
  * @details
  * This program implements two different tree data structures, 2-3 trees and AVL trees, for storing and managing graduate student data. 
@@ -159,6 +159,17 @@ class BTree {
         return root_->height;  // Directly return the height of the root node.
     }
 
+    /**
+     * @brief Function for inorder traversal of a B-Tree.
+     * 
+     * Recursively traverses the B-Tree in inorder fashion, collecting relevant data that matches 
+     * the specified keyword and storing it in the result vector.
+     * 
+     * @param result Vector to store the collected data.
+     * @param keyword Keyword for filtering the traversal results.
+     *        - If keyword is "*", all nodes' data are collected.
+     *        - Otherwise, only keys that match the keyword will have their data collected.
+     */
     void inorderTraversal(std::vector<T>& result, const std::string& keyword) {
         inorderTraversalHelper(root_, result, keyword);
     }
@@ -370,12 +381,33 @@ class BTree {
         }
     }
 
-    void inorderTraversalHelper(const BTreeNode<T>* node, std::vector<T>& result, const std::string& keyword) {
-        if (node == nullptr) return;
+    /**
+     * @brief Helper function for inorder traversal of a B-Tree.
+     * 
+     * Recursively traverses the B-Tree in inorder fashion, collecting relevant data that matches 
+     * the specified keyword and storing it in the result vector.
+     * 
+     * @param node Pointer to the current B-Tree node.
+     * @param result Vector to store the collected data.
+     * @param keyword Keyword for filtering the traversal results.
+     *        - If keyword is "*", all nodes' data are collected.
+     *        - Otherwise, only keys that match the keyword will have their data collected.
+     * 
+     * Traversal Process:
+     * 1. Visits child nodes recursively before and after each key within a node.
+     * 2. If a key matches the keyword, its associated data is added to the result.
+     * 3. Traverses the last child (if exists) after all keys are processed.
+     */
+    void inorderTraversalHelper(const BTreeNode<T>* node,
+                                std::vector<T>& result, const std::string& keyword) {
+        if (node == nullptr) {
+            return;
+        }
 
         for (size_t i = 0; i < node->keys.size(); ++i) {
-            if (!node->children.empty())
-            inorderTraversalHelper(node->children[i], result, keyword);
+            if (!node->children.empty()) {
+                inorderTraversalHelper(node->children[i], result, keyword);
+            }
 
             if (keyword == "*" || keyword == node->keys[i]) {
                 for (const auto& child : node->data) {
@@ -524,6 +556,17 @@ class AVLTree {
         return isEmpty() ? 0 : root_->height;
     }
 
+    /**
+     * @brief Performs an inorder traversal of the AVL Tree and collects matching data.
+     * 
+     * This function initiates an inorder traversal starting from the root of the AVL Tree.
+     * It collects data from nodes whose keys match the specified keyword and stores them in the result vector.
+     * 
+     * @param result Vector to store the collected data.
+     * @param keyword Keyword for filtering the traversal results. 
+     *        - If keyword is "*", all nodes' data are collected.
+     *        - Otherwise, only nodes with keys matching the keyword are collected.
+     */
     void inorderTraversal(std::vector<T>& result, const std::string& keyword) {
         inorderTraversalHelper(root_, result, keyword);
     }
@@ -691,7 +734,20 @@ class AVLTree {
         }
     }
 
-    void inorderTraversalHelper(AVLTreeNode<T>* node, std::vector<T>& result, const std::string& keyword) {
+    /**
+     * @brief Helper function for inorder traversal of the AVL Tree.
+     * 
+     * This recursive function traverses the tree in inorder fashion, collecting all relevant data 
+     * that matches the specified keyword. Results are appended to the provided result vector.
+     * 
+     * @param node Pointer to the current AVL tree node.
+     * @param result Vector to store the traversal results.
+     * @param keyword Keyword used for filtering the traversal results. 
+     *        - If keyword is "*", all node data are collected.
+     *        - Otherwise, only nodes with keys matching the keyword are collected.
+     */
+    void inorderTraversalHelper(AVLTreeNode<T>* node,
+                                std::vector<T>& result, const std::string& keyword) {
         if (node == nullptr) return;
 
         inorderTraversalHelper(node->left, result, keyword);
@@ -699,7 +755,7 @@ class AVLTree {
         if (keyword == "*" || node->key == keyword) {
             result.insert(result.end(), node->data.begin(), node->data.end());
         }
- 
+
         inorderTraversalHelper(node->right, result, keyword);
     }
 
@@ -1046,7 +1102,15 @@ void Task2(const std::vector<UniversityDepartment>& graduate_info_list,
     printSaveData(graduate_info_list, graduate_info.getRootData());
 }
 
-void Task3(const std::vector<UniversityDepartment> &graduate_info_list, BTree<int>& graduate_info_btree, AVLTree<int>& graduate_info_avl) {
+/**
+ * @brief Task 3: Searches graduate information using B-Tree and AVL Tree and outputs the intersection.
+ * 
+ * @param graduate_info_list A vector of graduate information.
+ * @param graduate_info_btree B-Tree indexed by college names.
+ * @param graduate_info_avl AVL Tree indexed by department names.
+ */
+void Task3(const std::vector<UniversityDepartment> &graduate_info_list,
+           BTree<int>& graduate_info_btree, AVLTree<int>& graduate_info_avl) {
     std::string college, department;
     std::vector<int> college_search, department_search;
 
@@ -1056,8 +1120,11 @@ void Task3(const std::vector<UniversityDepartment> &graduate_info_list, BTree<in
     std::cout << "Enter a department name to search [*]: ";
     std::cin >> department;
 
+    // Get information that equal the keyword.
     graduate_info_btree.inorderTraversal(college_search, college);
     graduate_info_avl.inorderTraversal(department_search, department);
+
+    // Get two vector's intersection.
     std::unordered_set<int> set(college_search.begin(), college_search.end());
     std::vector<int> intersection;
 
@@ -1067,6 +1134,7 @@ void Task3(const std::vector<UniversityDepartment> &graduate_info_list, BTree<in
         }
     }
 
+    // Output information.
     printSaveData(graduate_info_list, intersection);
 }
 
