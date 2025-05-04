@@ -1,40 +1,48 @@
 /**
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex03_27_10927262.cpp
- * @brief A program that utilizes 2-3 trees and AVL trees to efficiently manage and organize graduate student data.
- * @version 1.0.0
+ * @brief A program that implements hash tables with linear probing and double hashing to efficiently manage and organize graduate student data.
+ * @version 1.0.1
  *
  * @details
- * This program implements two different tree data structures, 2-3 trees and AVL trees, for storing and managing graduate student data. 
- * It supports insertion and searching(Root) operations in both tree structures, ensuring efficient data retrieval and organization. 
- * The program is designed to demonstrate the use of self-balancing trees in managing dynamic datasets like student records.
- * The user can perform operations such as adding new graduates, and searching for specific students by various criteria.
+ * This program implements two different hashing techniques, linear probing and double hashing, for storing and managing graduate student data. 
+ * It supports insertion and search operations in both hash table variants, ensuring efficient data retrieval and organization. 
+ * The program is designed to demonstrate the use of hashing techniques in managing dynamic datasets like student records.
+ * The user can perform operations such as building hash tables, and analyzing search performance metrics (successful and unsuccessful search comparisons).
  *
  * @author 
  * - Group 27
  * - 10927262 呂易鴻
  */
 
-#include <algorithm>
-#include <bitset>
-#include <cstddef>
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
-#include <fstream>
-#include <iostream>
-#include <iomanip>
-#include <limits>
-#include <stdexcept>
-#include <string>
-#include <vector>
-#include <mutex>
-#include <thread>
-#include <numeric>
+ #pragma GCC optimize("Ofast")
+ #include <algorithm>
+ #include <atomic>
+ #include <cstddef>
+ #include <cstdlib>
+ #include <cstring>
+ #include <fstream>
+ #include <iomanip>
+ #include <iostream>
+ #include <limits>
+ #include <mutex>
+ #include <numeric>
+ #include <stdexcept>
+ #include <string>
+ #include <sstream>
+ #include <thread>
+ #include <vector>
 
 #define COLUMNS 6    // Number of scores for each student.
 #define MAX_LEN 10   // Array size of student id and name.
 #define BIG_INT 255  // Integer upper bound.
+
+#ifdef DEBUG
+    #define DEBUG_LOG(msg) { std::lock_guard<std::mutex> lock(log_mtx); std::cout << "[DEBUG] " << msg << std::endl; }
+#else
+    #define DEBUG_LOG(msg)
+#endif
+
 
 static std::vector<bool> is_prime;
 static std::vector<int> prime_list;
@@ -54,7 +62,7 @@ class HashTable {
  public:
     enum class Mode { LINEAR, DOUBLE };
 
-    HashTable(const std::string& mode_str, const size_t table_size)
+    HashTable(const std::string& mode_str, const size_t& table_size)
         : table_size_(table_size), table_(table_size), occupied_(table_size, false) {
         if (mode_str == "linear") {
             mode_ = Mode::LINEAR;
@@ -65,7 +73,7 @@ class HashTable {
         }
     }
 
-    bool Insert(const StudentType& student, const size_t info_num) {
+    bool Insert(const StudentType& student, const size_t& info_num) {
         int index = Hash(student.sid);
         double target = (double)info_num / 5;
         size_t max_step = FindNextPrimeAbove(target);
@@ -91,21 +99,26 @@ class HashTable {
         return false;
     }
 
-    double UnsuccessfulSearch(const size_t info_num) const {
+    double UnsuccessfulSearch(const size_t& info_num) const {
         double target = static_cast<double>(info_num) / 5.0;
         size_t max_step = (mode_ == Mode::DOUBLE) ? FindNextPrimeAbove(target) : 1;
-    
+        
         size_t thread_count = std::thread::hardware_concurrency();
-        if (thread_count == 0) thread_count = 4;  // Fallback
-        size_t chunk_size = table_size_ / thread_count;
+        if (thread_count == 0) thread_count = 4;
     
         std::vector<std::thread> threads;
         std::vector<double> partial_sums(thread_count, 0.0);
+        std::atomic<size_t> global_index(0); // 動態工作索引
     
-        auto worker = [&](size_t tid, size_t start, size_t end) {
+        auto worker = [&](size_t tid) {
+            DEBUG_LOG("Thread " << tid << " started");
+    
             double local_sum = 0.0;
     
-            for (size_t i = start; i < end; ++i) {
+            while (true) {
+                size_t i = global_index.fetch_add(1); // 動態分配索引
+                if (i >= table_size_) break;
+    
                 if (!occupied_[i]) continue;
     
                 size_t step = (mode_ == Mode::DOUBLE) ? Step(table_[i].sid, max_step) : 1;
@@ -116,24 +129,28 @@ class HashTable {
                     ++count;
                     if (!occupied_[index]) {
                         local_sum += count;
+                        DEBUG_LOG("Thread " << tid << " found empty slot at index " << index);
                         break;
                     }
                     index = (index + step) % table_size_;
                 }
     
                 if (index == i) {
-                    partial_sums[tid] = 0.0;
-                    return;  // early return: full cycle without finding empty slot
+                    DEBUG_LOG("Thread " << tid << " encountered an infinite loop at index " << i);
                 }
             }
     
-            partial_sums[tid] = local_sum;
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                partial_sums[tid] = local_sum;
+            }
+    
+            DEBUG_LOG("Thread " << tid << " completed processing");
         };
     
-        for (size_t t = 0; t < thread_count; ++t) {
-            size_t start = t * chunk_size;
-            size_t end = (t == thread_count - 1) ? table_size_ : start + chunk_size;
-            threads.emplace_back(worker, t, start, end);
+        // 啟動執行緒
+        for (size_t i = 0; i < thread_count; ++i) {
+            threads.emplace_back(worker, i);
         }
     
         for (auto& th : threads) {
@@ -141,40 +158,65 @@ class HashTable {
         }
     
         double total_times = std::accumulate(partial_sums.begin(), partial_sums.end(), 0.0);
-        return total_times / table_size_;
+        return (total_times > 0) ? total_times / table_size_ : 0.0;
     }
-      
 
-    double SuccessfulSearch(const size_t info_num) const {
+    double SuccessfulSearch(const size_t& info_num) const {
         int totalComparisons = 0;
         int successfulSearches = 0;
         size_t thread_count = std::thread::hardware_concurrency(); // 取得可用 CPU 執行緒數量
-        size_t chunk_size = table_.size() / thread_count;
+        if (thread_count == 0) thread_count = 4; // 預設最少 4 個執行緒
+        
+        std::vector<std::thread> threads;
+        std::vector<int> localComparisons(thread_count, 0);
+        std::vector<int> localSearches(thread_count, 0);
+        std::atomic<size_t> global_index(0); // 動態工作索引
     
-        auto search_task = [&](size_t start, size_t end) {
-            int localComparisons = 0;
-            int localSearches = 0;
-            for (size_t i = start; i < end; ++i) {
-                if (table_[i].sid[0] != '\0') { 
-                    localComparisons += SuccessfulSearchHelper(table_[i].sid, info_num);
-                    ++localSearches;
+        auto search_task = [&](size_t tid) {
+            DEBUG_LOG("Thread " << tid << " started");
+            
+            int localComparisonCount = 0;
+            int localSearchCount = 0;
+    
+            while (true) {
+                size_t start = global_index.fetch_add(1); // 動態分配索引
+                if (start >= table_.size()) break;
+    
+                if (table_[start].sid[0] != '\0') {
+                    int comparisons = SuccessfulSearchHelper(table_[start].sid, info_num);
+                    localComparisonCount += comparisons;
+                    ++localSearchCount;
+    
+                    DEBUG_LOG("Thread " << tid << " searched sid " << table_[start].sid
+                              << ", comparisons: " << comparisons);
                 }
             }
-            std::lock_guard<std::mutex> lock(mtx); // 確保更新是安全的
-            totalComparisons += localComparisons;
-            successfulSearches += localSearches;
+    
+            {
+                std::lock_guard<std::mutex> lock(mtx);
+                localComparisons[tid] = localComparisonCount;
+                localSearches[tid] = localSearchCount;
+            }
+    
+            DEBUG_LOG("Thread " << tid << " completed, total comparisons: " << localComparisonCount
+                      << ", successful searches: " << localSearchCount);
         };
     
-        std::vector<std::thread> threads;
+        // 啟動執行緒
         for (size_t i = 0; i < thread_count; ++i) {
-            size_t start = i * chunk_size;
-            size_t end = (i == thread_count - 1) ? table_.size() : start + chunk_size;
-            threads.emplace_back(search_task, start, end);
+            threads.emplace_back(search_task, i);
         }
     
         for (auto& th : threads) {
             th.join(); // 確保所有執行緒都完成
         }
+    
+        // 計算總比對次數和成功搜尋次數
+        totalComparisons = std::accumulate(localComparisons.begin(), localComparisons.end(), 0);
+        successfulSearches = std::accumulate(localSearches.begin(), localSearches.end(), 0);
+    
+        DEBUG_LOG("All threads completed, final total comparisons: " << totalComparisons
+                  << ", final successful searches: " << successfulSearches);
     
         return (successfulSearches > 0) ? static_cast<double>(totalComparisons) / info_num : 0.0;
     }
@@ -253,6 +295,7 @@ class HashTable {
     std::vector<HashEntry> table_;
     std::vector<bool> occupied_;
     mutable std::mutex mtx;
+    mutable std::mutex log_mtx;
 
     size_t Hash(const char* key) const {
         if (!key) return 0;
@@ -265,7 +308,7 @@ class HashTable {
         return product % table_size_;
     }
 
-    size_t Step(const char* key, const size_t max_step) const {
+    size_t Step(const char* key, const size_t& max_step) const {
         if (!key) return 0;
     
         unsigned long long product = 1;
@@ -276,7 +319,7 @@ class HashTable {
         return max_step - (product % max_step);
     }
 
-    int SuccessfulSearchHelper(const std::string& sid, const size_t info_num) const {
+    int SuccessfulSearchHelper(const std::string& sid, const size_t& info_num) const {
         int index = Hash(sid.c_str());
         double target = (double)info_num / 5;
         size_t max_step = FindNextPrimeAbove(target);
@@ -457,6 +500,7 @@ static void Task1(const std::vector<StudentType>& student_info, const std::strin
     double target = student_info.size() * 1.1;
     size_t hash_size = FindNextPrimeAbove(target);
     std::string file_name = "linear" + file_number + ".txt";
+    std::ostringstream buffer;
 
     HashTable X("linear", hash_size);
 
@@ -466,18 +510,21 @@ static void Task1(const std::vector<StudentType>& student_info, const std::strin
         }
     }
 
-    std::cout << "Hash table has been successfully created by Linear probing   \n";
+    buffer << "Hash table has been successfully created by Linear probing   \n";
 
     X.SaveToFile(file_name);
-    std::cout << std::fixed << std::setprecision(4);
-    std::cout << "unsuccessful search: " << X.UnsuccessfulSearch(student_info.size()) << " comparisons on average\n";
-    std::cout << "successful search: " << X.SuccessfulSearch(student_info.size()) << " comparisons on average\n";
+    buffer << std::fixed << std::setprecision(4);
+    buffer << "unsuccessful search: " << X.UnsuccessfulSearch(student_info.size()) << " comparisons on average\n";
+    buffer << "successful search: " << X.SuccessfulSearch(student_info.size()) << " comparisons on average\n";
+
+    std::cout << buffer.str();
 }
 
 static void Task2(const std::vector<StudentType>& student_info, const std::string& file_number) {
     double target = student_info.size() * 1.1;
     size_t hash_size = FindNextPrimeAbove(target);
     std::string file_name = "double" + file_number + ".txt";
+    std::ostringstream buffer;
 
     HashTable Y("double", hash_size);
 
@@ -487,11 +534,13 @@ static void Task2(const std::vector<StudentType>& student_info, const std::strin
         }
     }
 
-    std::cout << "Hash table has been successfully created by Double hashing   \n";
+    buffer << "Hash table has been successfully created by Double hashing   \n";
 
     Y.SaveToFile(file_name);
-    std::cout << std::fixed << std::setprecision(4);
-    std::cout << "successful search: " << Y.SuccessfulSearch(student_info.size()) << " comparisons on average\n";
+    buffer << std::fixed << std::setprecision(4);
+    buffer << "successful search: " << Y.SuccessfulSearch(student_info.size()) << " comparisons on average\n";
+
+    std::cout << buffer.str();
 }
 
 /**
@@ -510,6 +559,7 @@ int main() {
     std::string file_name;
     std::string file_number;
     std::vector<StudentType> temp_info;
+    std::ostringstream buffer;
 
     do {
         while (true) {
@@ -532,10 +582,14 @@ int main() {
                 std::cin.clear();
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
-                std::cout << std::endl;
-                std::cout << "Command does not exist!\n";
-                std::cout << std::endl;
-                std::cout << std::endl;
+                buffer << std::endl;
+                buffer << "Command does not exist!\n";
+                buffer << std::endl;
+                buffer << std::endl;
+
+                std::cout << buffer.str();
+                buffer.str("");
+                buffer.clear(); 
             }
         }
 
@@ -570,10 +624,14 @@ int main() {
 
             break;
         default:
-            std::cout << std::endl;
-            std::cout << "Command does not exist!\n";
-            std::cout << std::endl;
-            std::cout << std::endl;
+            buffer << std::endl;
+            buffer << "Command does not exist!\n";
+            buffer << std::endl;
+            buffer << std::endl;
+
+            std::cout << buffer.str();
+            buffer.str("");
+            buffer.clear(); 
         }
     } while (select_command != 0);  // Continue until the user selects option 0 (quit)
 
