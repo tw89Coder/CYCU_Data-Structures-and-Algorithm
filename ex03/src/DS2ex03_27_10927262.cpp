@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex03_27_10927262.cpp
  * @brief A program that implements hash tables with linear probing and double hashing to efficiently manage and organize graduate student data.
- * @version 1.0.2
+ * @version 1.0.3
  *
  * @details
  * This program implements two different hashing techniques, linear probing and double hashing, for storing and managing graduate student data. 
@@ -42,20 +42,26 @@
 #define BIG_INT 255   // Integer upper bound.
 
 #ifdef DEBUG
+    // Thread-safe debug logging
     #define DEBUG_LOG(msg) { std::lock_guard<std::mutex> lock(log_mtx); \
                              std::cout << "[DEBUG] " << msg << std::endl; }
 #else
-    #define DEBUG_LOG(msg)
+    // Expands to nothing in non-DEBUG builds (no runtime overhead) 
+    #define DEBUG_LOG(msg)   
 #endif
 
-
-static std::vector<bool> is_prime;
-static std::vector<int> prime_list;
-static int prime_limit = 1;
+// Sieve of Eratosthenes data structures:
+static std::vector<bool> is_prime;   // Flags indicating primality (true = prime)
+static std::vector<int> prime_list;  // List of actual prime numbers found
+static int prime_limit = 1;          // Current upper bound for generated primes
 
 // Forward declaration
 static int FindNextPrimeAbove(double var);
 
+/**
+ * @struct StudentType
+ * @brief Represents student record data.
+ */
 typedef struct st {
     char sid[MAX_LEN];             // student id
     char sname[MAX_LEN];           // student name
@@ -63,12 +69,34 @@ typedef struct st {
     float mean;                    // The average of scores.
 } StudentType;
 
+/**
+ * @class HashTable
+ * @brief Implements hash tables with linear probing and double hashing techniques.
+ *
+ * This class provides functionality to store and manage graduate student data using
+ * either linear probing or double hashing collision resolution methods. It supports
+ * insertion, searching, and performance analysis operations.
+ */
 class HashTable {
  public:
+    /**
+     * @enum Mode
+     * @brief Specifies the hashing technique to be used.
+     *
+     * Linear probing collision resolution.
+     * Double hashing collision resolution.
+     */
     enum class Mode { LINEAR, DOUBLE };
 
+    /**
+     * @brief Constructs a HashTable with specified mode and size.
+     * @param mode_str The hashing mode ("linear" or "double").
+     * @param table_size The initial size of the hash table.
+     * @throw std::invalid_argument If an unsupported mode is provided.
+     */
     HashTable(const std::string& mode_str, const size_t& table_size)
         : table_size_(table_size), table_(table_size), occupied_(table_size, false) {
+        // Initialize hash table based on specified mode.
         if (mode_str == "linear") {
             mode_ = Mode::LINEAR;
         } else if (mode_str == "double") {
@@ -78,12 +106,22 @@ class HashTable {
         }
     }
 
+    /**
+     * @brief Inserts a student record into the hash table.
+     * @param student The student data to insert.
+     * @param info_num The total number of student records (used for step calculation).
+     * @return true if insertion was successful, false otherwise.
+     */
     bool Insert(const StudentType& student, const size_t& info_num) {
+        // Calculate initial hash position.
         int index = Hash(student.sid);
+
+        // Determine step size based on hashing mode.
         double target = static_cast<double>(info_num) / 5;
         size_t max_step = FindNextPrimeAbove(target);
         int step = (mode_ == Mode::DOUBLE) ? Step(student.sid, max_step) : 1;
 
+        // Prepare hash entry for insertion.
         HashEntry temp_entry;
         temp_entry.hvalue = index % table_size_;
         std::strncpy(temp_entry.sid, student.sid, MAX_LEN - 1);
@@ -92,6 +130,7 @@ class HashTable {
         temp_entry.sname[MAX_LEN - 1] = '\0';
         temp_entry.mean = student.mean;
 
+        // Find empty slot using probing.
         for (int i = 0; i < table_size_; ++i) {
             int try_index = (index + i * step) % table_size_;
             if (!occupied_[try_index]) {
@@ -100,11 +139,21 @@ class HashTable {
                 return true;
             }
         }
+
+        // If no empty slot found.
         std::cerr << "HashTable full. Cannot insert " << student.sid << "\n";
         return false;
     }
 
+    /**
+     * @brief Calculates the average comparisons for unsuccessful searches.
+     * @param info_num The total number of student records.
+     * @return The average number of comparisons needed.
+     *
+     * This method uses multiple threads to parallelize the computation.
+     */
     double UnsuccessfulSearch(const size_t& info_num) const {
+        // Setup for parallel processing.
         double target = static_cast<double>(info_num) / 5.0;
         size_t max_step = (mode_ == Mode::DOUBLE) ? FindNextPrimeAbove(target) : 1;
 
@@ -113,7 +162,7 @@ class HashTable {
 
         std::vector<std::thread> threads;
         std::vector<double> partial_sums(thread_count, 0.0);
-        std::atomic<size_t> global_index(0);  // 動態工作索引
+        std::atomic<size_t> global_index(0);  // Dynamic Work Index. For Work Stealing.
 
         auto worker = [&](size_t tid) {
             DEBUG_LOG("Thread " << tid << " started");
@@ -121,15 +170,17 @@ class HashTable {
             double local_sum = 0.0;
 
             while (true) {
-                size_t i = global_index.fetch_add(1);  // 動態分配索引
+                size_t i = global_index.fetch_add(1);  // Dynamic Index Allocation.
                 if (i >= table_size_) break;
 
                 if (!occupied_[i]) continue;
 
+                // Calculate probing sequence
                 size_t step = (mode_ == Mode::DOUBLE) ? Step(table_[i].sid, max_step) : 1;
                 size_t index = (i + step) % table_size_;
                 size_t count = 0;
 
+                // Count comparisons until empty slot found
                 while (index != i) {
                     ++count;
                     if (!occupied_[index]) {
@@ -153,7 +204,7 @@ class HashTable {
             DEBUG_LOG("Thread " << tid << " completed processing");
         };
 
-        // 啟動執行緒
+        // Launch and join threads
         for (size_t i = 0; i < thread_count; ++i) {
             threads.emplace_back(worker, i);
         }
@@ -162,20 +213,28 @@ class HashTable {
             th.join();
         }
 
+        // Calculate average comparisons
         double total_times = std::accumulate(partial_sums.begin(), partial_sums.end(), 0.0);
         return (total_times > 0) ? total_times / table_size_ : 0.0;
     }
 
+    /**
+     * @brief Calculates the average comparisons for successful searches.
+     * @param info_num The total number of student records.
+     * @return The average number of comparisons needed.
+     *
+     * This method uses multiple threads to parallelize the computation.
+     */
     double SuccessfulSearch(const size_t& info_num) const {
         int totalComparisons = 0;
         int successfulSearches = 0;
-        size_t thread_count = std::thread::hardware_concurrency();  // 取得可用 CPU 執行緒數量
-        if (thread_count == 0) thread_count = 4;  // 預設最少 4 個執行緒
+        size_t thread_count = std::thread::hardware_concurrency();  // Get the number of available CPU threads.
+        if (thread_count == 0) thread_count = 4;  // The default minimum number of threads is 4.
 
         std::vector<std::thread> threads;
         std::vector<int> localComparisons(thread_count, 0);
         std::vector<int> localSearches(thread_count, 0);
-        std::atomic<size_t> global_index(0);  // 動態工作索引
+        std::atomic<size_t> global_index(0);  // Dynamic Work Index. For Work Stealing.
 
         auto search_task = [&](size_t tid) {
             DEBUG_LOG("Thread " << tid << " started");
@@ -184,7 +243,7 @@ class HashTable {
             int localSearchCount = 0;
 
             while (true) {
-                size_t start = global_index.fetch_add(1);  // 動態分配索引
+                size_t start = global_index.fetch_add(1);  // Dynamic Index Allocation.
                 if (start >= table_.size()) break;
 
                 if (table_[start].sid[0] != '\0') {
@@ -207,16 +266,16 @@ class HashTable {
                       << ", successful searches: " << localSearchCount);
         };
 
-        // 啟動執行緒
+        // Launch and join threads
         for (size_t i = 0; i < thread_count; ++i) {
             threads.emplace_back(search_task, i);
         }
 
         for (auto& th : threads) {
-            th.join();  // 確保所有執行緒都完成
+            th.join();
         }
 
-        // 計算總比對次數和成功搜尋次數
+        // Calculate average comparisons
         totalComparisons = std::accumulate(localComparisons.begin(), localComparisons.end(), 0);
         successfulSearches = std::accumulate(localSearches.begin(), localSearches.end(), 0);
 
@@ -226,6 +285,9 @@ class HashTable {
         return (successfulSearches > 0) ? static_cast<double>(totalComparisons) / info_num : 0.0;
     }
 
+    /**
+     * @brief Prints the contents of the hash table to standard output.
+     */
     void Print() const {
         std::cout << "\n[Hash Table - " << ((mode_ == Mode::LINEAR) ? "Linear" : "Double")
                     << " Hashing, Size: " << table_size_ << "]\n";
@@ -244,6 +306,10 @@ class HashTable {
         std::cout << "-----------------------------------------------------\n";
     }
 
+    /**
+     * @brief Saves the hash table contents to a file.
+     * @param file_name The name of the file to save to.
+     */
     void SaveToFile(const std::string& file_name) const {
         std::ofstream out_file(file_name);
         if (!out_file.is_open()) {
@@ -282,25 +348,37 @@ class HashTable {
         out_file.close();
     }
 
+    /**
+     * @brief Clears all entries from the hash table.
+     */
     void Clear() {
         std::fill(occupied_.begin(), occupied_.end(), false);
     }
 
  private:
+    /**
+     * @struct HashEntry
+     * @brief Represents an entry in the hash table.
+     */
     struct HashEntry {
-        int hvalue;
-        char sid[MAX_LEN];
-        char sname[MAX_LEN];
-        float mean;
+        int hvalue;                 // Hash value of the entry
+        char sid[MAX_LEN];          // Student ID
+        char sname[MAX_LEN];        // Student name
+        float mean;                 // Average score
     };
 
-    Mode mode_;
-    size_t table_size_;
-    std::vector<HashEntry> table_;
-    std::vector<bool> occupied_;
-    mutable std::mutex mtx;
-    mutable std::mutex log_mtx;
+    Mode mode_;                     // Hashing technique mode
+    size_t table_size_;             // Size of the hash table
+    std::vector<HashEntry> table_;  // Storage for hash table entries
+    std::vector<bool> occupied_;    // Tracks occupied slots
+    mutable std::mutex mtx;         // Mutex for thread safety
+    mutable std::mutex log_mtx;     // Mutex for logging
 
+    /**
+     * @brief Computes the hash value for a given key.
+     * @param key The string to hash (student ID).
+     * @return The computed hash value.
+     */
     size_t Hash(const char* key) const {
         if (!key) return 0;
 
@@ -312,6 +390,12 @@ class HashTable {
         return product % table_size_;
     }
 
+    /**
+     * @brief Computes the step size for double hashing.
+     * @param key The string to use for step calculation.
+     * @param max_step The maximum step size allowed.
+     * @return The computed step size.
+     */
     size_t Step(const char* key, const size_t& max_step) const {
         if (!key) return 0;
 
@@ -323,6 +407,12 @@ class HashTable {
         return max_step - (product % max_step);
     }
 
+    /**
+     * @brief Helper function for successful search operation.
+     * @param sid The student ID to search for.
+     * @param info_num Total number of student records.
+     * @return Number of comparisons made during search.
+     */
     int SuccessfulSearchHelper(const std::string& sid, const size_t& info_num) const {
         int index = Hash(sid.c_str());
         double target = static_cast<double>(info_num) / 5.0;
@@ -335,18 +425,25 @@ class HashTable {
             ++comparisons;
 
             if (occupied_[try_index] && std::strcmp(table_[try_index].sid, sid.c_str()) == 0) {
-                return comparisons;  // 成功搜尋比較次數
+                return comparisons;  // Number of successful search comparisons.
             }
             if (!occupied_[try_index]) break;
         }
 
         return comparisons;
     }
-};
+};  // class HashTable
 
-// 使用埃拉托色尼篩法建立質數表
+/**
+ * @brief Generates prime numbers up to a specified limit using Sieve of Eratosthenes.
+ * 
+ * Maintains a cache of generated primes to optimize subsequent calls.
+ * Updates the global prime_list and is_prime vectors.
+ * 
+ * @param new_limit The upper bound for prime number generation.
+ */
 static void GeneratePrimesUpTo(double new_limit) {
-    if (new_limit <= prime_limit) return;  // 已生成過，無需重複
+    if (new_limit <= prime_limit) return;  // Already generated, no need to repeat.
 
     if (prime_limit < 2) {
         prime_limit = 2;
@@ -375,26 +472,49 @@ static void GeneratePrimesUpTo(double new_limit) {
     prime_limit = new_limit;
 }
 
+/**
+ * @brief Finds the smallest prime number greater than the target value.
+ * 
+ * Uses pre-generated primes if available, otherwise generates new primes as needed.
+ * 
+ * @param target The value to find the next prime above.
+ * @return int The smallest prime greater than target, or -1 if error occurs.
+ */
 static int FindNextPrimeAbove(double target) {
-    GeneratePrimesUpTo(target * 2);  // 預留空間
+    GeneratePrimesUpTo(target * 2);  // Reserve space
 
     auto it = std::lower_bound(prime_list.begin(), prime_list.end(), target);
     if (it != prime_list.end()) {
         return *it;
     }
 
-    // 若 prime_list 沒有足夠大，擴充再找
+    // If prime_list is not large enough, expand it and find
     GeneratePrimesUpTo(target * 4);
     it = std::lower_bound(prime_list.begin(), prime_list.end(), target);
-    return (it != prime_list.end()) ? *it : -1;  // -1 表示沒找到（理論上不會）
+    return (it != prime_list.end()) ? *it : -1;  // -1 means not found (theoretically not)
 }
 
-
+/**
+ * @brief Checks if a file exists in the filesystem.
+ * 
+ * @param filename The name/path of the file to check.
+ * @return true if file exists and is accessible, false otherwise.
+ */
 static bool fileExists(const std::string& filename) {
     std::ifstream file(filename);
     return file.good();
 }
 
+/**
+ * @brief Converts a text file containing student records to a binary format.
+ * 
+ * Reads a tab-delimited text file with student data and writes it in binary format.
+ * The text file should contain student ID, name, scores, and mean in each line.
+ * 
+ * @param output_file_name [out] Will contain the name of the created binary file.
+ * @param file_number [in,out] The number used to identify input/output files.
+ * @return int Number of student records converted, or 0 if operation failed.
+ */
 static int Text2Binary(std::string& output_file_name, std::string& file_number) {
     std::fstream in_file, out_file;
     int student_count = 0;
@@ -482,6 +602,13 @@ static int Text2Binary(std::string& output_file_name, std::string& file_number) 
     return student_count;
 }
 
+/**
+ * @brief Reads student records from a binary file into a vector.
+ * 
+ * @tparam T The type of data to read (should be StudentType).
+ * @param file_name Name of the binary file to read from.
+ * @param vec [out] Vector that will contain the read student records.
+ */
 template <typename T>
 static void ReadBinary(const std::string& file_name, std::vector<T>& vec) {
     std::fstream binary_file(file_name, std::ios::in | std::ios::binary);
@@ -491,7 +618,6 @@ static void ReadBinary(const std::string& file_name, std::vector<T>& vec) {
     }
 
     StudentType student = {};
-    int index = 0;
 
     while (binary_file.read(reinterpret_cast<char*>(&student), sizeof(student))) {
         vec.push_back(student);
@@ -500,6 +626,16 @@ static void ReadBinary(const std::string& file_name, std::vector<T>& vec) {
     binary_file.close();
 }
 
+/**
+ * @brief Executes Task 1 operations using linear probing hash table.
+ * 
+ * Creates a hash table with linear probing collision resolution,
+ * inserts all student records, calculates search performance metrics,
+ * and saves results to a file.
+ * 
+ * @param student_info Vector containing all student records to process.
+ * @param file_number Used to name the output file (e.g., "linear1.txt").
+ */
 static void Task1(const std::vector<StudentType>& student_info, const std::string& file_number) {
     double target = student_info.size() * 1.1;
     size_t hash_size = FindNextPrimeAbove(target);
@@ -526,6 +662,16 @@ static void Task1(const std::vector<StudentType>& student_info, const std::strin
     std::cout << buffer.str();
 }
 
+/**
+ * @brief Executes Task 2 operations using double hashing.
+ * 
+ * Creates a hash table with double hashing collision resolution,
+ * inserts all student records, calculates search performance metrics,
+ * and saves results to a file.
+ * 
+ * @param student_info Vector containing all student records to process.
+ * @param file_number Used to name the output file (e.g., "double1.txt").
+ */
 static void Task2(const std::vector<StudentType>& student_info, const std::string& file_number) {
     double target = student_info.size() * 1.1;
     size_t hash_size = FindNextPrimeAbove(target);
@@ -551,18 +697,19 @@ static void Task2(const std::vector<StudentType>& student_info, const std::strin
 }
 
 /**
- * @brief Main function to drive the program logic.
+ * @brief Main program entry point.
  * 
- * The main function provides a menu for the user to select operations. It handles task selection, builds the appropriate tree
- * (2-3 tree or AVL tree), and displays relevant information about the trees. 
- * The user can keep choosing options until they select to quit (option 0).
+ * Provides a menu-driven interface for hash table operations:
+ * 0. Quit
+ * 1. Linear probing operations
+ * 2. Double hashing operations
  * 
- * @return int Returns 0 on successful execution.
+ * Handles user input, file operations, and coordinates task execution.
+ * 
+ * @return int Returns 0 on normal program termination.
  */
 int main() {
     int select_command = 0;
-    int select_lower_bound = 0;
-    int select_upper_bound = 2;
     std::string file_name;
     std::string file_number;
     std::vector<StudentType> temp_info;
