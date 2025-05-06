@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex03_27_10927262.cpp
  * @brief A program that implements hash tables with linear probing and double hashing to efficiently manage and organize graduate student data.
- * @version 1.0.3
+ * @version 1.0.4
  *
  * @details
  * This program implements two different hashing techniques, linear probing and double hashing, for storing and managing graduate student data. 
@@ -132,17 +132,21 @@ class HashTable {
 
         // Find empty slot using probing.
         for (int i = 0; i < table_size_; ++i) {
+            // Calculate next probe position using.
             int try_index = (index + i * step) % table_size_;
+
+            // Check if slot is available.
             if (!occupied_[try_index]) {
+                // Insert the record.
                 table_[try_index] = temp_entry;
                 occupied_[try_index] = true;
-                return true;
+                return true;  // Success.
             }
         }
 
         // If no empty slot found.
         std::cerr << "HashTable full. Cannot insert " << student.sid << "\n";
-        return false;
+        return false;  // Failure.
     }
 
     /**
@@ -153,50 +157,58 @@ class HashTable {
      * This method uses multiple threads to parallelize the computation.
      */
     double UnsuccessfulSearch(const size_t& info_num) const {
-        // Setup for parallel processing.
+        // Calculate step size parameters.
         double target = static_cast<double>(info_num) / 5.0;
         size_t max_step = (mode_ == Mode::DOUBLE) ? FindNextPrimeAbove(target) : 1;
 
+        // Determine number of threads to use (default to 4 if detection fails).
         size_t thread_count = std::thread::hardware_concurrency();
         if (thread_count == 0) thread_count = 4;
 
+        // Thread management structures.
         std::vector<std::thread> threads;
-        std::vector<double> partial_sums(thread_count, 0.0);
+        std::vector<double> partial_sums(thread_count, 0.0); // Per-thread results.
         std::atomic<size_t> global_index(0);  // Dynamic Work Index. For Work Stealing.
 
+        // Worker function for each thread.
         auto worker = [&](size_t tid) {
             DEBUG_LOG("Thread " << tid << " started");
 
             double local_sum = 0.0;
 
+            // Process slots until all are handled.
             while (true) {
+                // Get next slot to process (atomic operation).
                 size_t i = global_index.fetch_add(1);  // Dynamic Index Allocation.
-                if (i >= table_size_) break;
+                if (i >= table_size_) break;  // Exit when done.
 
+                // Skip empty slots (only measure from occupied slots).
                 if (!occupied_[i]) continue;
 
-                // Calculate probing sequence
+                // Calculate probing sequence.
                 size_t step = (mode_ == Mode::DOUBLE) ? Step(table_[i].sid, max_step) : 1;
                 size_t index = (i + step) % table_size_;
                 size_t count = 0;
 
-                // Count comparisons until empty slot found
+                // Count comparisons until empty slot found.
                 while (index != i) {
                     ++count;
                     if (!occupied_[index]) {
-                        local_sum += count;
+                        local_sum += count;  // // Record comparisons needed.
                         DEBUG_LOG("Thread " << tid << " found empty slot at index " << index);
                         break;
                     }
                     index = (index + step) % table_size_;
                 }
 
+                // // Safety check for infinite loops.
                 if (index == i) {
                     DEBUG_LOG("Thread " << tid << " encountered an infinite loop at index " << i);
                 }
             }
 
             {
+                // Store thread's results.
                 std::lock_guard<std::mutex> lock(mtx);
                 partial_sums[tid] = local_sum;
             }
@@ -204,11 +216,12 @@ class HashTable {
             DEBUG_LOG("Thread " << tid << " completed processing");
         };
 
-        // Launch and join threads
+        // Launch worker threads.
         for (size_t i = 0; i < thread_count; ++i) {
             threads.emplace_back(worker, i);
         }
 
+        // Wait for all threads to complete.
         for (auto& th : threads) {
             th.join();
         }
@@ -226,27 +239,36 @@ class HashTable {
      * This method uses multiple threads to parallelize the computation.
      */
     double SuccessfulSearch(const size_t& info_num) const {
+        // Result accumulators.
         int totalComparisons = 0;
         int successfulSearches = 0;
+
+        // Determine number of threads to use.
         size_t thread_count = std::thread::hardware_concurrency();  // Get the number of available CPU threads.
         if (thread_count == 0) thread_count = 4;  // The default minimum number of threads is 4.
 
+        // Thread management structures.
         std::vector<std::thread> threads;
         std::vector<int> localComparisons(thread_count, 0);
         std::vector<int> localSearches(thread_count, 0);
         std::atomic<size_t> global_index(0);  // Dynamic Work Index. For Work Stealing.
 
+        // Worker function for each thread.
         auto search_task = [&](size_t tid) {
             DEBUG_LOG("Thread " << tid << " started");
 
             int localComparisonCount = 0;
             int localSearchCount = 0;
 
+            // Process until all slots are handled.
             while (true) {
+                // Get next slot to process (atomic operation).
                 size_t start = global_index.fetch_add(1);  // Dynamic Index Allocation.
                 if (start >= table_.size()) break;
 
+                // Skip empty slots.
                 if (table_[start].sid[0] != '\0') {
+                    // Simulate search for this student.
                     int comparisons = SuccessfulSearchHelper(table_[start].sid, info_num);
                     localComparisonCount += comparisons;
                     ++localSearchCount;
@@ -257,6 +279,7 @@ class HashTable {
             }
 
             {
+                // Store thread's results.
                 std::lock_guard<std::mutex> lock(mtx);
                 localComparisons[tid] = localComparisonCount;
                 localSearches[tid] = localSearchCount;
@@ -266,22 +289,24 @@ class HashTable {
                       << ", successful searches: " << localSearchCount);
         };
 
-        // Launch and join threads
+        // Launch worker threads.
         for (size_t i = 0; i < thread_count; ++i) {
             threads.emplace_back(search_task, i);
         }
 
+        // Wait for all threads to complete.
         for (auto& th : threads) {
             th.join();
         }
 
-        // Calculate average comparisons
+        // Aggregate results from all threads
         totalComparisons = std::accumulate(localComparisons.begin(), localComparisons.end(), 0);
         successfulSearches = std::accumulate(localSearches.begin(), localSearches.end(), 0);
 
         DEBUG_LOG("All threads completed, final total comparisons: " << totalComparisons
                   << ", final successful searches: " << successfulSearches);
 
+        // Calculate final average (protect against division by zero).
         return (successfulSearches > 0) ? static_cast<double>(totalComparisons) / info_num : 0.0;
     }
 
@@ -414,19 +439,31 @@ class HashTable {
      * @return Number of comparisons made during search.
      */
     int SuccessfulSearchHelper(const std::string& sid, const size_t& info_num) const {
+        // Calculate initial hash position.
         int index = Hash(sid.c_str());
+
+        // Determine step size parameters.
         double target = static_cast<double>(info_num) / 5.0;
         size_t max_step = FindNextPrimeAbove(target);
         int step = (mode_ == Mode::DOUBLE) ? Step(sid.c_str(), max_step) : 1;
+
+        // Initialize comparison counter.
         int comparisons = 0;
 
+        // Probe through the hash table
         for (int i = 0; i < table_size_; ++i) {
+            // Calculate next position to check.
             int try_index = (index + i * step) % table_size_;
+
+            // Count this comparison attempt.
             ++comparisons;
 
+            // Check if current slot contains our target.
             if (occupied_[try_index] && std::strcmp(table_[try_index].sid, sid.c_str()) == 0) {
                 return comparisons;  // Number of successful search comparisons.
             }
+
+            // Optimization: stop probing if it hit an empty slot (item not present).
             if (!occupied_[try_index]) break;
         }
 
@@ -445,30 +482,41 @@ class HashTable {
 static void GeneratePrimesUpTo(double new_limit) {
     if (new_limit <= prime_limit) return;  // Already generated, no need to repeat.
 
+    // Initial setup for first-time generation (below 2).
     if (prime_limit < 2) {
         prime_limit = 2;
+        // Initialize sieve array with all numbers marked as prime initially.
         is_prime.assign(new_limit + 1, true);
+        // 0 and 1 are not primes.
         is_prime[0] = is_prime[1] = false;
+        // Clear any existing prime list.
         prime_list.clear();
     } else {
+        // Expand existing sieve array, marking new positions as potentially prime.
         is_prime.resize(new_limit + 1, true);
     }
 
+    // Sieve of Eratosthenes algorithm
     for (int i = 2; i * i <= new_limit; ++i) {
         if (is_prime[i]) {
+            // Calculate starting point for marking multiples:
+            // Begin from max(i^2, first multiple >= current prime_limit)
             int start = std::max(i * i, ((prime_limit + i - 1) / i) * i);
+            // Mark all multiples of i as non-prime
             for (int j = start; j <= new_limit; j += i) {
                 is_prime[j] = false;
             }
         }
     }
 
+    // Collect newly identified primes into prime_list
     for (int i = prime_limit + 1; i <= new_limit; ++i) {
         if (is_prime[i]) {
             prime_list.push_back(i);
         }
     }
 
+    // Update the upper limit of generated primes
     prime_limit = new_limit;
 }
 
@@ -483,9 +531,10 @@ static void GeneratePrimesUpTo(double new_limit) {
 static int FindNextPrimeAbove(double target) {
     GeneratePrimesUpTo(target * 2);  // Reserve space
 
+    // Search for the first prime >= target in cached list
     auto it = std::lower_bound(prime_list.begin(), prime_list.end(), target);
     if (it != prime_list.end()) {
-        return *it;
+        return *it;  // Return found prime
     }
 
     // If prime_list is not large enough, expand it and find
@@ -637,26 +686,29 @@ static void ReadBinary(const std::string& file_name, std::vector<T>& vec) {
  * @param file_number Used to name the output file (e.g., "linear1.txt").
  */
 static void Task1(const std::vector<StudentType>& student_info, const std::string& file_number) {
-    double target = student_info.size() * 1.1;
+    size_t student_info_size = student_info.size();
+    double target = student_info_size * 1.1;
     size_t hash_size = FindNextPrimeAbove(target);
     std::string file_name = "linear" + file_number + ".txt";
     std::ostringstream buffer;
 
     HashTable X("linear", hash_size);
 
+    // Insert hash table.
     for (const auto& student : student_info) {
-        if (!X.Insert(student, student_info.size())) {
+        if (!X.Insert(student, student_info_size)) {
             std::cerr << "Can not INSERT: " << student.sid << "\n";
         }
     }
 
     buffer << "Hash table has been successfully created by Linear probing   \n";
 
+    // Output information.
     X.SaveToFile(file_name);
     buffer << std::fixed << std::setprecision(4);
-    buffer << "unsuccessful search: " << X.UnsuccessfulSearch(student_info.size())
+    buffer << "unsuccessful search: " << X.UnsuccessfulSearch(student_info_size)
            << " comparisons on average\n";
-    buffer << "successful search: " << X.SuccessfulSearch(student_info.size())
+    buffer << "successful search: " << X.SuccessfulSearch(student_info_size)
            << " comparisons on average\n";
 
     std::cout << buffer.str();
@@ -673,24 +725,27 @@ static void Task1(const std::vector<StudentType>& student_info, const std::strin
  * @param file_number Used to name the output file (e.g., "double1.txt").
  */
 static void Task2(const std::vector<StudentType>& student_info, const std::string& file_number) {
-    double target = student_info.size() * 1.1;
+    size_t student_info_size = student_info.size();
+    double target = student_info_size * 1.1;
     size_t hash_size = FindNextPrimeAbove(target);
     std::string file_name = "double" + file_number + ".txt";
     std::ostringstream buffer;
 
     HashTable Y("double", hash_size);
 
+    // Insert hash table.
     for (const auto& student : student_info) {
-        if (!Y.Insert(student, student_info.size())) {
+        if (!Y.Insert(student, student_info_size)) {
             std::cerr << "Can not INSERT: " << student.sid << "\n";
         }
     }
 
     buffer << "Hash table has been successfully created by Double hashing   \n";
 
+    // Output information.
     Y.SaveToFile(file_name);
     buffer << std::fixed << std::setprecision(4);
-    buffer << "successful search: " << Y.SuccessfulSearch(student_info.size())
+    buffer << "successful search: " << Y.SuccessfulSearch(student_info_size)
            << " comparisons on average\n";
 
     std::cout << buffer.str();
