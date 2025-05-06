@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex03_27_10927262.cpp
  * @brief A program that implements hash tables with linear probing and double hashing to efficiently manage and organize graduate student data.
- * @version 1.0.4
+ * @version 1.0.5
  *
  * @details
  * This program implements two different hashing techniques, linear probing and double hashing, for storing and managing graduate student data. 
@@ -94,13 +94,17 @@ class HashTable {
      * @param table_size The initial size of the hash table.
      * @throw std::invalid_argument If an unsupported mode is provided.
      */
-    HashTable(const std::string& mode_str, const size_t& table_size)
-        : table_size_(table_size), table_(table_size), occupied_(table_size, false) {
+    HashTable(const std::string& mode_str, const size_t& table_size, const size_t& info_num)
+        : table_size_(table_size), table_(table_size),
+          occupied_(table_size, false), info_num_(info_num) {
         // Initialize hash table based on specified mode.
         if (mode_str == "linear") {
             mode_ = Mode::LINEAR;
+            max_step_ = 1;
         } else if (mode_str == "double") {
             mode_ = Mode::DOUBLE;
+            double target = static_cast<double>(info_num_) / 5.0;
+            max_step_ = FindNextPrimeAbove(target);
         } else {
             throw std::invalid_argument("Unsupported hash mode: " + mode_str);
         }
@@ -109,17 +113,14 @@ class HashTable {
     /**
      * @brief Inserts a student record into the hash table.
      * @param student The student data to insert.
-     * @param info_num The total number of student records (used for step calculation).
      * @return true if insertion was successful, false otherwise.
      */
-    bool Insert(const StudentType& student, const size_t& info_num) {
+    bool Insert(const StudentType& student) {
         // Calculate initial hash position.
         int index = Hash(student.sid);
 
         // Determine step size based on hashing mode.
-        double target = static_cast<double>(info_num) / 5;
-        size_t max_step = FindNextPrimeAbove(target);
-        int step = (mode_ == Mode::DOUBLE) ? Step(student.sid, max_step) : 1;
+        int step = (mode_ == Mode::DOUBLE) ? Step(student.sid) : 1;
 
         // Prepare hash entry for insertion.
         HashEntry temp_entry;
@@ -151,16 +152,11 @@ class HashTable {
 
     /**
      * @brief Calculates the average comparisons for unsuccessful searches.
-     * @param info_num The total number of student records.
      * @return The average number of comparisons needed.
      *
      * This method uses multiple threads to parallelize the computation.
      */
-    double UnsuccessfulSearch(const size_t& info_num) const {
-        // Calculate step size parameters.
-        double target = static_cast<double>(info_num) / 5.0;
-        size_t max_step = (mode_ == Mode::DOUBLE) ? FindNextPrimeAbove(target) : 1;
-
+    double UnsuccessfulSearch() const {
         // Determine number of threads to use (default to 4 if detection fails).
         size_t thread_count = std::thread::hardware_concurrency();
         if (thread_count == 0) thread_count = 4;
@@ -186,7 +182,7 @@ class HashTable {
                 if (!occupied_[i]) continue;
 
                 // Calculate probing sequence.
-                size_t step = (mode_ == Mode::DOUBLE) ? Step(table_[i].sid, max_step) : 1;
+                size_t step = (mode_ == Mode::DOUBLE) ? Step(table_[i].sid) : 1;
                 size_t index = (i + step) % table_size_;
                 size_t count = 0;
 
@@ -233,12 +229,11 @@ class HashTable {
 
     /**
      * @brief Calculates the average comparisons for successful searches.
-     * @param info_num The total number of student records.
      * @return The average number of comparisons needed.
      *
      * This method uses multiple threads to parallelize the computation.
      */
-    double SuccessfulSearch(const size_t& info_num) const {
+    double SuccessfulSearch() const {
         // Result accumulators.
         int totalComparisons = 0;
         int successfulSearches = 0;
@@ -269,7 +264,7 @@ class HashTable {
                 // Skip empty slots.
                 if (table_[start].sid[0] != '\0') {
                     // Simulate search for this student.
-                    int comparisons = SuccessfulSearchHelper(table_[start].sid, info_num);
+                    int comparisons = SuccessfulSearchHelper(table_[start].sid);
                     localComparisonCount += comparisons;
                     ++localSearchCount;
 
@@ -307,7 +302,7 @@ class HashTable {
                   << ", final successful searches: " << successfulSearches);
 
         // Calculate final average (protect against division by zero).
-        return (successfulSearches > 0) ? static_cast<double>(totalComparisons) / info_num : 0.0;
+        return (successfulSearches > 0) ? static_cast<double>(totalComparisons) / info_num_ : 0.0;
     }
 
     /**
@@ -394,6 +389,8 @@ class HashTable {
 
     Mode mode_;                     // Hashing technique mode
     size_t table_size_;             // Size of the hash table
+    size_t info_num_;               // Numbers of input information
+    size_t max_step_;               // Size of the max step(double)
     std::vector<HashEntry> table_;  // Storage for hash table entries
     std::vector<bool> occupied_;    // Tracks occupied slots
     mutable std::mutex mtx;         // Mutex for thread safety
@@ -418,10 +415,9 @@ class HashTable {
     /**
      * @brief Computes the step size for double hashing.
      * @param key The string to use for step calculation.
-     * @param max_step The maximum step size allowed.
      * @return The computed step size.
      */
-    size_t Step(const char* key, const size_t& max_step) const {
+    size_t Step(const char* key) const {
         if (!key) return 0;
 
         uint64_t  product = 1;
@@ -429,23 +425,20 @@ class HashTable {
             product *= static_cast<uint64_t >(key[i]);
         }
 
-        return max_step - (product % max_step);
+        return max_step_ - (product % max_step_);
     }
 
     /**
      * @brief Helper function for successful search operation.
      * @param sid The student ID to search for.
-     * @param info_num Total number of student records.
      * @return Number of comparisons made during search.
      */
-    int SuccessfulSearchHelper(const std::string& sid, const size_t& info_num) const {
+    int SuccessfulSearchHelper(const std::string& sid) const {
         // Calculate initial hash position.
         int index = Hash(sid.c_str());
 
         // Determine step size parameters.
-        double target = static_cast<double>(info_num) / 5.0;
-        size_t max_step = FindNextPrimeAbove(target);
-        int step = (mode_ == Mode::DOUBLE) ? Step(sid.c_str(), max_step) : 1;
+        int step = (mode_ == Mode::DOUBLE) ? Step(sid.c_str()) : 1;
 
         // Initialize comparison counter.
         int comparisons = 0;
@@ -692,11 +685,11 @@ static void Task1(const std::vector<StudentType>& student_info, const std::strin
     std::string file_name = "linear" + file_number + ".txt";
     std::ostringstream buffer;
 
-    HashTable X("linear", hash_size);
+    HashTable X("linear", hash_size, student_info_size);
 
     // Insert hash table.
     for (const auto& student : student_info) {
-        if (!X.Insert(student, student_info_size)) {
+        if (!X.Insert(student)) {
             std::cerr << "Can not INSERT: " << student.sid << "\n";
         }
     }
@@ -706,9 +699,9 @@ static void Task1(const std::vector<StudentType>& student_info, const std::strin
     // Output information.
     X.SaveToFile(file_name);
     buffer << std::fixed << std::setprecision(4);
-    buffer << "unsuccessful search: " << X.UnsuccessfulSearch(student_info_size)
+    buffer << "unsuccessful search: " << X.UnsuccessfulSearch()
            << " comparisons on average\n";
-    buffer << "successful search: " << X.SuccessfulSearch(student_info_size)
+    buffer << "successful search: " << X.SuccessfulSearch()
            << " comparisons on average\n";
 
     std::cout << buffer.str();
@@ -731,11 +724,11 @@ static void Task2(const std::vector<StudentType>& student_info, const std::strin
     std::string file_name = "double" + file_number + ".txt";
     std::ostringstream buffer;
 
-    HashTable Y("double", hash_size);
+    HashTable Y("double", hash_size, student_info_size);
 
     // Insert hash table.
     for (const auto& student : student_info) {
-        if (!Y.Insert(student, student_info_size)) {
+        if (!Y.Insert(student)) {
             std::cerr << "Can not INSERT: " << student.sid << "\n";
         }
     }
@@ -745,7 +738,7 @@ static void Task2(const std::vector<StudentType>& student_info, const std::strin
     // Output information.
     Y.SaveToFile(file_name);
     buffer << std::fixed << std::setprecision(4);
-    buffer << "successful search: " << Y.SuccessfulSearch(student_info_size)
+    buffer << "successful search: " << Y.SuccessfulSearch()
            << " comparisons on average\n";
 
     std::cout << buffer.str();
