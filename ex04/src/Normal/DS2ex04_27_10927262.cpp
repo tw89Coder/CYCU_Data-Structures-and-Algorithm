@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex03_27_10927262.cpp
  * @brief A program that implements hash tables with linear probing and double hashing to efficiently manage and organize graduate student data.
- * @version 1.1.0
+ * @version 1.2.0
  *
  * @details
  * This program implements two different hashing techniques, linear probing and double hashing, for storing and managing graduate student data. 
@@ -160,8 +160,6 @@ class DirectedGraph {
 
         if (is_new_subscriber) {
             adj_list[subscriber] = {};
-        } else {
-            sorted_edges_valid = false;
         }
 
         if (is_new_publisher) {
@@ -170,6 +168,7 @@ class DirectedGraph {
     }
 
     void SaveToAdjFile(const std::string& file_number) const {
+        std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>> adj_list_sorted;
         std::string file_name = "pairs" + file_number + ".adj";
         std::ofstream adj_output(file_name.c_str());
 
@@ -181,7 +180,27 @@ class DirectedGraph {
         size_t publisher_index = 0;
 
         SortKeys();
-        SortAllEdges();
+
+        for (const auto& key : sorted_keys) {
+            const NodeType& node = key;
+            const std::vector<std::pair<NodeType, float>>& edges = adj_list.at(key);
+
+            std::vector<std::pair<NodeType, float>> sorted_edges(edges.begin(), edges.end());
+
+            if (sorted_edges.size() < 32) {
+                std::stable_sort(sorted_edges.begin(), sorted_edges.end(),
+                    [](const std::pair<NodeType, float>& first, const std::pair<NodeType, float>& second) {
+                        return first.first < second.first;
+                    });
+            } else {
+                std::sort(sorted_edges.begin(), sorted_edges.end(),
+                    [](const std::pair<NodeType, float>& first, const std::pair<NodeType, float>& second) {
+                        return first.first < second.first;
+                    });
+            }
+
+            adj_list_sorted[node] = std::move(sorted_edges);
+        }
 
         std::ostringstream buffer;
 
@@ -222,9 +241,8 @@ class DirectedGraph {
 
         buffer << "<<< There are " << reachable_counts.size() << " IDs in total. >>>\n";
 
-        for (typename std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>>::iterator it = reachable_map.begin();
-            it != reachable_map.end(); ++it) {
-            std::vector<std::tuple<NodeType, float, float>>& vec = it->second;
+        for (const auto& key : sorted_keys) {
+            std::vector<std::tuple<NodeType, float, float>>& vec = reachable_map.at(key);
 
             std::stable_sort(vec.begin(), vec.end(),
                 [](const std::tuple<NodeType, float, float>& a, const std::tuple<NodeType, float, float>& b) {
@@ -235,11 +253,7 @@ class DirectedGraph {
         for (size_t i = 0; i < reachable_counts.size(); ++i) {
             const NodeType& key = reachable_counts[i].first;
 
-            typename std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>>::const_iterator it = reachable_map.find(key);
-            if (it == reachable_map.end()) continue;
-
-            const std::vector<std::tuple<NodeType, float, float>>& reachables = it->second;
-            if (reachables.empty()) continue;
+            const std::vector<std::tuple<NodeType, float, float>>& reachables = reachable_map.at(key);
 
             buffer << "[" << std::setw(3) << i + 1 << "] " << key << "(" << reachable_counts[i].second << "): \n";
 
@@ -262,25 +276,24 @@ class DirectedGraph {
     void ComputeAllConnectionCounts(const std::string& mode) {
         reachable_map.clear();
         reachable_counts.clear();
-        SortKeys();
 
         {
             ThreadPool pool(std::thread::hardware_concurrency());
             std::mutex results_mutex;
             
             for (const auto& key : sorted_keys) {
-                pool.Enqueue([&, key]() {
+                pool.Enqueue(std::bind([&](NodeType key) {
                     std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> local_map;
-                    std::pair<NodeType, size_t> local_count;  // 改為單個 pair
-                    
+                    std::pair<NodeType, size_t> local_count;
+
                     BFSUpdateReachable(key, mode, local_map, local_count);
-                    
+
                     std::lock_guard<std::mutex> lock(results_mutex);
                     for (auto& pair : local_map) {
                         reachable_map[pair.first] = std::move(pair.second);
                     }
-                    reachable_counts.push_back(local_count);  // 改為 push_back
-                });
+                    reachable_counts.push_back(local_count);
+                }, key));
             }
             
             // ThreadPool 析構會自動等待所有任務完成
@@ -300,18 +313,15 @@ class DirectedGraph {
     void Clear() {
         adj_list.clear();
         sorted_keys.resize(0);
-        adj_list_sorted.clear();
         reachable_map.clear();
         reachable_counts.resize(0);
         is_sorted = false;
-        sorted_edges_valid = false;
         publisher_count = 0;
         node_count = 0;
     }
 
     void Graph() {
         adj_list.max_load_factor(0.25);
-        adj_list_sorted.max_load_factor(0.25);
         reachable_map.max_load_factor(0.25);
     }
 
@@ -331,11 +341,9 @@ class DirectedGraph {
     std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>> adj_list;
 
     mutable std::vector<NodeType> sorted_keys;
-    mutable std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>> adj_list_sorted;
     mutable std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> reachable_map;
     mutable std::vector<std::pair<NodeType, size_t>> reachable_counts;
     mutable bool is_sorted = false;
-    mutable bool sorted_edges_valid = false;
 
     size_t publisher_count = 0;
     size_t node_count = 0;
@@ -367,35 +375,6 @@ class DirectedGraph {
         }
 
         is_sorted = true;
-    }
-
-    void SortAllEdges() const {
-        if (sorted_edges_valid) return;
-
-        adj_list_sorted.clear();
-
-        for (typename std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>>::const_iterator it = adj_list.begin(); it != adj_list.end(); ++it) {
-            const NodeType& node = it->first;
-            const std::vector<std::pair<NodeType, float>>& edges = it->second;
-
-            std::vector<std::pair<NodeType, float>> sorted_edges(edges.begin(), edges.end());
-
-            if (sorted_edges.size() < 32) {
-                std::stable_sort(sorted_edges.begin(), sorted_edges.end(),
-                    [](const std::pair<NodeType, float>& first, const std::pair<NodeType, float>& second) {
-                        return first.first < second.first;
-                    });
-            } else {
-                std::sort(sorted_edges.begin(), sorted_edges.end(),
-                    [](const std::pair<NodeType, float>& first, const std::pair<NodeType, float>& second) {
-                        return first.first < second.first;
-                    });
-            }
-
-            adj_list_sorted[node] = std::move(sorted_edges);
-        }
-
-        sorted_edges_valid = true;
     }
 
     void BFSUpdateReachable(const NodeType& key, const std::string& mode,
