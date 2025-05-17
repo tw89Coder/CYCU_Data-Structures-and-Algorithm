@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex03_27_10927262.cpp
  * @brief A program that implements hash tables with linear probing and double hashing to efficiently manage and organize graduate student data.
- * @version 1.0.0
+ * @version 1.1.0
  *
  * @details
  * This program implements two different hashing techniques, linear probing and double hashing, for storing and managing graduate student data. 
@@ -33,6 +33,8 @@
 #include <vector>      // Dynamic array container
 #include <queue>
 #include <unordered_set>
+#include <condition_variable>
+#include <functional>
 
 // C Standard Library (C++ wrapper headers, alphabetical order)
 #include <cstddef>     // Fundamental types (size_t, nullptr_t)
@@ -62,6 +64,84 @@ typedef struct st {
     char subscriber[MAX_LEN];           // student name
     float weight;                    // The average of scores.
 } StudentType;
+
+class ThreadPool {
+public:
+    explicit ThreadPool(size_t threads) : stop(false), busy_threads(0) {
+        for (size_t i = 0; i < threads; ++i) {
+            workers.emplace_back([this] {
+                for (;;) {
+                    std::function<void()> task;
+
+                    {
+                        std::unique_lock<std::mutex> lock(queue_mutex);
+                        condition.wait(lock, [this] { return stop || !tasks.empty(); });
+
+                        if (stop && tasks.empty()) return;
+
+                        task = std::move(tasks.front());
+                        tasks.pop();
+                        busy_threads++;
+                    }
+
+                    task();
+                    
+                    {
+                        std::unique_lock<std::mutex> lock(queue_mutex);
+                        busy_threads--;
+                        cv_finished.notify_one();
+                    }
+                }
+            });
+        }
+    }
+
+    template<class F>
+    void Enqueue(F&& f) {
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            tasks.emplace([this, func = std::forward<F>(f)] {
+                func();
+                {
+                    std::unique_lock<std::mutex> lock(queue_mutex);
+                    busy_threads--;
+                    cv_finished.notify_one();
+                }
+            });
+            busy_threads++;
+        }
+        condition.notify_one();
+    }
+
+    void WaitAll() {
+        std::unique_lock<std::mutex> lock(queue_mutex);
+        cv_finished.wait(lock, [this] { return tasks.empty() && (busy_threads == 0); });
+    }
+
+    ~ThreadPool() {
+        {
+            std::unique_lock<std::mutex> lock(queue_mutex);
+            stop = true;
+        }
+        condition.notify_all();
+        for (std::thread& worker : workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+    }
+
+private:
+    std::vector<std::thread> workers;
+    std::queue<std::function<void()>> tasks;
+
+    std::mutex queue_mutex;
+    std::condition_variable condition;
+    std::condition_variable cv_finished;
+
+    std::atomic<bool> stop;
+    std::atomic<size_t> busy_threads;
+};
 
 template <typename NodeType>
 class DirectedGraph {
@@ -179,30 +259,38 @@ class DirectedGraph {
         cnt_output << buffer.str();
     }
 
-    void ComputeAllConnectionCounts(const std::string& mode) const {
+    void ComputeAllConnectionCounts(const std::string& mode) {
         reachable_map.clear();
         reachable_counts.clear();
-        sorted_keys.clear();
+        SortKeys();
 
-        for (typename std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>>::const_iterator it = adj_list.begin(); it != adj_list.end(); ++it) {
-            BFSUpdateReachable(it->first, mode);
+        {
+            ThreadPool pool(std::thread::hardware_concurrency());
+            std::mutex results_mutex;
+            
+            for (const auto& key : sorted_keys) {
+                pool.Enqueue([&, key]() {
+                    std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> local_map;
+                    std::pair<NodeType, size_t> local_count;  // 改為單個 pair
+                    
+                    BFSUpdateReachable(key, mode, local_map, local_count);
+                    
+                    std::lock_guard<std::mutex> lock(results_mutex);
+                    for (auto& pair : local_map) {
+                        reachable_map[pair.first] = std::move(pair.second);
+                    }
+                    reachable_counts.push_back(local_count);  // 改為 push_back
+                });
+            }
+            
+            // ThreadPool 析構會自動等待所有任務完成
+            pool.WaitAll();
         }
-
+        
         std::stable_sort(reachable_counts.begin(), reachable_counts.end(),
             [](const std::pair<NodeType, size_t>& a, const std::pair<NodeType, size_t>& b) {
-                if (a.second != b.second) {
-                    return a.second > b.second;
-                } else {
-                    return a.first < b.first;
-                }
-                
+                return a.second != b.second ? a.second > b.second : a.first < b.first;
             });
-
-        for (size_t i = 0; i < reachable_counts.size(); ++i) {
-            sorted_keys.push_back(reachable_counts[i].first);
-        }
-
-        is_sorted = true;
     }
 
     bool Empty() const {
@@ -219,6 +307,12 @@ class DirectedGraph {
         sorted_edges_valid = false;
         publisher_count = 0;
         node_count = 0;
+    }
+
+    void Graph() {
+        adj_list.max_load_factor(0.25);
+        adj_list_sorted.max_load_factor(0.25);
+        reachable_map.max_load_factor(0.25);
     }
 
     size_t GetPubCount() const {
@@ -245,6 +339,8 @@ class DirectedGraph {
 
     size_t publisher_count = 0;
     size_t node_count = 0;
+
+    std::mutex mtx; 
 
     // Sorts the keys only once unless the graph changes
     void SortKeys() const {
@@ -302,25 +398,25 @@ class DirectedGraph {
         sorted_edges_valid = true;
     }
 
-    void BFSUpdateReachable(const NodeType& key, const std::string& mode) const {
-        reachable_map[key].clear();
-
+    void BFSUpdateReachable(const NodeType& key, const std::string& mode,
+                            std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>>& local_reachable_map,
+                            std::pair<NodeType, size_t>& local_count) const {
         std::unordered_map<NodeType, float> weight_map;
         std::unordered_map<NodeType, float> edge_map;
         std::unordered_set<NodeType> visited;
         std::queue<NodeType> q;
 
+        // 預先分配記憶體來減少 rehash
+        weight_map.reserve(adj_list.size());
+        edge_map.reserve(adj_list.size());
+        visited.reserve(adj_list.size());
+
         weight_map[key] = 0.0f;
         edge_map[key] = 0.0f;
-        
+
         auto it = adj_list.find(key);
         if (it != adj_list.end()) {
-            const std::vector<std::pair<NodeType, float>>& neighbors = it->second;
-            
-            for (const auto& neighbor_pair : neighbors) {
-                const NodeType& neighbor = neighbor_pair.first;
-                float edge_weight = neighbor_pair.second;
-                
+            for (const auto& [neighbor, edge_weight] : it->second) {
                 weight_map[neighbor] = edge_weight;
                 edge_map[neighbor] = edge_weight;
                 q.push(neighbor);
@@ -336,51 +432,37 @@ class DirectedGraph {
             auto neighbor_it = adj_list.find(current);
             if (neighbor_it == adj_list.end()) continue;
 
-            const std::vector<std::pair<NodeType, float>>& neighbors = neighbor_it->second;
+            for (const auto& [neighbor, edge_weight] : neighbor_it->second) {
+                if (neighbor == key) continue;
 
-            for (const auto& neighbor_pair : neighbors) {
-                const NodeType& neighbor = neighbor_pair.first;
-                
-                if (neighbor == key) {
-                    continue;
-                }
-
-                float edge_weight = neighbor_pair.second;
                 float total_weight = current_weight + edge_weight;
 
-                bool should_update = false;
-                if (weight_map.find(neighbor) == weight_map.end()) {
-                    should_update = true;
-                } else if (mode == "min" && total_weight < weight_map[neighbor]) {
-                    should_update = true;
-                } else if (mode == "max" && total_weight > weight_map[neighbor]) {
-                    should_update = true;
-                }
+                auto weight_it = weight_map.find(neighbor);
+                bool should_update = (weight_it == weight_map.end()) ||
+                                    (mode == "min" && total_weight < weight_it->second) ||
+                                    (mode == "max" && total_weight > weight_it->second);
 
                 if (should_update) {
                     weight_map[neighbor] = total_weight;
                     edge_map[neighbor] = edge_weight;
                     
-                    if (visited.find(neighbor) == visited.end()) {
+                    if (visited.insert(neighbor).second) {  // 使用 insert() 的回傳值來減少查找次數
                         q.push(neighbor);
-                        visited.insert(neighbor);
                     }
                 }
             }
         }
 
         std::vector<std::tuple<NodeType, float, float>> result;
-        for (const auto& weight_pair : weight_map) {
-            const NodeType& node = weight_pair.first;
+        result.reserve(weight_map.size());
+
+        for (const auto& [node, acc_weight] : weight_map) {
             if (node == key) continue;
-            
-            float acc_weight = weight_pair.second;
-            float last_edge_weight = edge_map.at(node);
-            result.emplace_back(node, last_edge_weight, acc_weight);
+            result.emplace_back(node, edge_map.at(node), acc_weight);
         }
 
-        reachable_map[key] = result;
-        reachable_counts.emplace_back(key, weight_map.size() - 1);
+        local_reachable_map[key] = std::move(result);
+        local_count = {key, weight_map.size() - 1};
     }
 
 };
@@ -476,11 +558,14 @@ static void Task2(DirectedGraph<std::string>& dir_graph, const std::string& file
 int main() {
     std::ios_base::sync_with_stdio(false);
     std::cin.tie(nullptr);
+    std::cout.tie(nullptr);
 
     int select_command = 0;
     std::string file_number;
     std::string file_name;
     DirectedGraph<std::string> dir_graph;
+
+    dir_graph.Graph();
 
     do {
         while (true) {
