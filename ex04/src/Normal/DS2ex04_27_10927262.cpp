@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex03_27_10927262.cpp
  * @brief A program that implements hash tables with linear probing and double hashing to efficiently manage and organize graduate student data.
- * @version 1.2.0
+ * @version 1.3.0
  *
  * @details
  * This program implements two different hashing techniques, linear probing and double hashing, for storing and managing graduate student data. 
@@ -25,20 +25,18 @@
 #include <unordered_map>
 #include <sys/stat.h>
 #include <mutex>       // Mutual exclusion (mutex, lock_guard)
-#include <numeric>     // Numeric operations (accumulate, inner_product)
 #include <sstream>     // String streams (istringstream, ostringstream)
-#include <stdexcept>   // Standard exceptions (runtime_error, logic_error)
 #include <string>      // String class and operations
 #include <thread>      // Thread support (std::thread)
 #include <vector>      // Dynamic array container
 #include <queue>
-#include <unordered_set>
+#include <deque>
 #include <condition_variable>
 #include <functional>
+#include <chrono>
 
 // C Standard Library (C++ wrapper headers, alphabetical order)
 #include <cstddef>     // Fundamental types (size_t, nullptr_t)
-#include <cstdint>     // Fixed-width integer types (int32_t, uint64_t)
 #include <cstdlib>     // General utilities (malloc, exit, atoi)
 #include <cstring>     // C-style string operations (strcpy, memcmp)
 
@@ -48,11 +46,11 @@
 
 #ifdef DEBUG
     // Thread-safe debug logging
-    #define DEBUG_LOG(msg) { std::lock_guard<std::mutex> lock(log_mtx); \
-                             std::cout << "[DEBUG] " << msg << '\n'; }
+    #define THREAD_LOG(msg) { std::lock_guard<std::mutex> lock(log_mtx); \
+                             std::cout << "[THREAD] " << msg << '\n'; }
 #else
     // Expands to nothing in non-DEBUG builds (no runtime overhead) 
-    #define DEBUG_LOG(msg)   
+    #define THREAD_LOG(msg)   
 #endif
 
 /**
@@ -67,29 +65,50 @@ typedef struct st {
 
 class ThreadPool {
 public:
-    explicit ThreadPool(size_t threads) : stop(false), busy_threads(0) {
+    explicit ThreadPool(size_t threads, size_t batch_size = 1)
+        : stop(false), busy_threads(0), batch_size(batch_size) {
         for (size_t i = 0; i < threads; ++i) {
-            workers.emplace_back([this] {
+            workers.emplace_back([this, i, batch_size] {
+                THREAD_LOG("Worker thread " << i << " started");
                 for (;;) {
-                    std::function<void()> task;
+                    std::vector<std::function<void()>> task_batch;
 
                     {
                         std::unique_lock<std::mutex> lock(queue_mutex);
+                        THREAD_LOG("Worker thread " << i << " waiting for tasks");
                         condition.wait(lock, [this] { return stop || !tasks.empty(); });
 
-                        if (stop && tasks.empty()) return;
+                        if (stop && tasks.empty()) {
+                            THREAD_LOG("Worker thread " << i << " terminating");
+                            return;
+                        }
 
-                        task = std::move(tasks.front());
-                        tasks.pop();
-                        busy_threads++;
+                        // 批次抓取任務
+                        size_t count = std::min(batch_size, tasks.size());
+                        for (size_t j = 0; j < count; ++j) {
+                            task_batch.push_back(std::move(tasks.front()));
+                            tasks.pop();
+                        }
+                        busy_threads += count;
+                        THREAD_LOG("Worker thread " << i << " got batch of " << count
+                                    << " tasks (busy: " << busy_threads << ")");
                     }
 
-                    task();
-                    
+                    // 執行任務
+                    for (auto& task : task_batch) {
+                        auto start = std::chrono::steady_clock::now();
+                        task();
+                        auto end = std::chrono::steady_clock::now();
+                        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+                        THREAD_LOG("Worker thread " << i << " completed task in "
+                                    << duration.count() << "ms");
+                    }
+
                     {
                         std::unique_lock<std::mutex> lock(queue_mutex);
-                        busy_threads--;
-                        cv_finished.notify_one();
+                        busy_threads -= task_batch.size();
+                        THREAD_LOG("Worker thread " << i << " batch done (busy: " << busy_threads << ")");
+                        cv_finished.notify_all();
                     }
                 }
             });
@@ -100,22 +119,14 @@ public:
     void Enqueue(F&& f) {
         {
             std::unique_lock<std::mutex> lock(queue_mutex);
-            tasks.emplace([this, func = std::forward<F>(f)] {
-                func();
-                {
-                    std::unique_lock<std::mutex> lock(queue_mutex);
-                    busy_threads--;
-                    cv_finished.notify_one();
-                }
-            });
-            busy_threads++;
+            tasks.emplace(std::forward<F>(f));
         }
         condition.notify_one();
     }
 
     void WaitAll() {
         std::unique_lock<std::mutex> lock(queue_mutex);
-        cv_finished.wait(lock, [this] { return tasks.empty() && (busy_threads == 0); });
+        cv_finished.wait(lock, [this] { return tasks.empty() && busy_threads == 0; });
     }
 
     ~ThreadPool() {
@@ -136,12 +147,15 @@ private:
     std::queue<std::function<void()>> tasks;
 
     std::mutex queue_mutex;
+    mutable std::mutex log_mtx;
     std::condition_variable condition;
     std::condition_variable cv_finished;
 
     std::atomic<bool> stop;
     std::atomic<size_t> busy_threads;
+    size_t batch_size;
 };
+
 
 template <typename NodeType>
 class DirectedGraph {
@@ -168,7 +182,6 @@ class DirectedGraph {
     }
 
     void SaveToAdjFile(const std::string& file_number) const {
-        std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>> adj_list_sorted;
         std::string file_name = "pairs" + file_number + ".adj";
         std::ofstream adj_output(file_name.c_str());
 
@@ -178,53 +191,41 @@ class DirectedGraph {
         }
 
         size_t publisher_index = 0;
-
         SortKeys();
 
-        for (const auto& key : sorted_keys) {
-            const NodeType& node = key;
-            const std::vector<std::pair<NodeType, float>>& edges = adj_list.at(key);
-
-            std::vector<std::pair<NodeType, float>> sorted_edges(edges.begin(), edges.end());
-
-            if (sorted_edges.size() < 32) {
-                std::stable_sort(sorted_edges.begin(), sorted_edges.end(),
-                    [](const std::pair<NodeType, float>& first, const std::pair<NodeType, float>& second) {
-                        return first.first < second.first;
-                    });
-            } else {
-                std::sort(sorted_edges.begin(), sorted_edges.end(),
-                    [](const std::pair<NodeType, float>& first, const std::pair<NodeType, float>& second) {
-                        return first.first < second.first;
-                    });
-            }
-
-            adj_list_sorted[node] = std::move(sorted_edges);
-        }
-
         std::ostringstream buffer;
-
         buffer << "<<< There are " << publisher_count << " IDs in total. >>>\n";
 
         for (const NodeType& publisher : sorted_keys) {
-            const std::vector<std::pair<NodeType, float>>& sorted_edges = adj_list_sorted.at(publisher);
+            auto it = adj_list.find(publisher);
+            if (it == adj_list.end() || it->second.empty()) continue;
 
-            if (sorted_edges.empty()) continue;
+            std::vector<std::pair<NodeType, float>>& edges = it->second;
+
+            if (edges.size() < 32) {
+                std::stable_sort(edges.begin(), edges.end(),
+                    [](const auto& first, const auto& second) { return first.first < second.first; });
+            } else {
+                std::sort(edges.begin(), edges.end(),
+                    [](const auto& first, const auto& second) { return first.first < second.first; });
+            }
 
             ++publisher_index;
             buffer << "[" << std::setw(3) << publisher_index << "] " << publisher << ": \n";
 
-            for (size_t i = 0; i < sorted_edges.size(); ++i) {
-                const std::pair<NodeType, float>& edge = sorted_edges[i];
+            size_t line_counter = 1;
+            for (size_t i = 0; i < edges.size(); ++i) {
+                const auto& edge = edges[i];
                 buffer << "\t(" << std::setw(2) << i + 1 << ") " << edge.first << "," << std::setw(7) << edge.second;
-
-                if ((i + 1) % 12 == 0) buffer << '\n';
+                if (line_counter++ == 12) {
+                    buffer << '\n';
+                    line_counter = 1;
+                }
             }
             buffer << '\n';
         }
 
         buffer << "<<< There are " << node_count << " nodes in total. >>>\n";
-
         adj_output << buffer.str();
     }
 
@@ -257,13 +258,15 @@ class DirectedGraph {
 
             buffer << "[" << std::setw(3) << i + 1 << "] " << key << "(" << reachable_counts[i].second << "): \n";
 
+            size_t line_counter = 1;
             for (size_t j = 0; j < reachables.size(); ++j) {
                 const std::tuple<NodeType, float, float>& tup = reachables[j];
                 buffer << "\t(" << std::setw(2) << j + 1 << ") " 
                        << std::get<0>(tup);
 
-                if ((j + 1) % 12 == 0) {
+                if (line_counter++ == 12) {
                     buffer << '\n';
+                    line_counter = 1;
                 }
             }
 
@@ -277,30 +280,67 @@ class DirectedGraph {
         reachable_map.clear();
         reachable_counts.clear();
 
+        auto start_time = std::chrono::steady_clock::now();
+        THREAD_LOG("Starting ComputeAllConnectionCounts with " 
+                << std::thread::hardware_concurrency() << " threads");
+
         {
             ThreadPool pool(std::thread::hardware_concurrency());
             std::mutex results_mutex;
-            
-            for (const auto& key : sorted_keys) {
-                pool.Enqueue(std::bind([&](NodeType key) {
+
+            const size_t mini_batch_size = 8;  // 調整這裡看效能效果
+            size_t total_keys = sorted_keys.size();
+            size_t task_count = 0;
+
+            for (size_t i = 0; i < total_keys; i += mini_batch_size) {
+                size_t start_idx = i;
+                size_t end_idx = std::min(i + mini_batch_size, total_keys);
+
+                task_count++;
+                pool.Enqueue([&, start_idx, end_idx]() {
+                    auto task_start = std::chrono::steady_clock::now();
+                    THREAD_LOG("Mini batch processing keys " << start_idx << " to " << (end_idx - 1));
+
                     std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> local_map;
-                    std::pair<NodeType, size_t> local_count;
+                    std::vector<std::pair<NodeType, size_t>> local_counts;
 
-                    BFSUpdateReachable(key, mode, local_map, local_count);
+                    for (size_t j = start_idx; j < end_idx; ++j) {
+                        NodeType key = sorted_keys[j];
+                        std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> temp_map;
+                        std::pair<NodeType, size_t> temp_count;
+                        BFSUpdateReachable(key, mode, temp_map, temp_count);
 
-                    std::lock_guard<std::mutex> lock(results_mutex);
-                    for (auto& pair : local_map) {
-                        reachable_map[pair.first] = std::move(pair.second);
+                        for (auto& pair : temp_map) {
+                            local_map[pair.first] = std::move(pair.second);
+                        }
+                        local_counts.push_back(std::move(temp_count));
                     }
-                    reachable_counts.push_back(local_count);
-                }, key));
+
+                    {
+                        std::lock_guard<std::mutex> lock(results_mutex);
+                        for (auto& pair : local_map) {
+                            reachable_map[pair.first] = std::move(pair.second);
+                        }
+                        reachable_counts.insert(reachable_counts.end(), local_counts.begin(), local_counts.end());
+                    }
+
+                    auto task_end = std::chrono::steady_clock::now();
+                    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(task_end - task_start);
+                    THREAD_LOG("Completed mini batch [" << start_idx << ", " << end_idx - 1 << "] in " << duration.count() << "ms");
+                });
             }
-            
-            // ThreadPool 析構會自動等待所有任務完成
+
+            THREAD_LOG("Enqueued " << task_count << " mini batch tasks for processing");
             pool.WaitAll();
         }
-        
-        std::stable_sort(reachable_counts.begin(), reachable_counts.end(),
+
+        auto end_time = std::chrono::steady_clock::now();
+        auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+
+        THREAD_LOG("ComputeAllConnectionCounts completed in " << total_duration.count() << "ms");
+        THREAD_LOG("Processed " << reachable_counts.size() << " nodes");
+
+        std::sort(reachable_counts.begin(), reachable_counts.end(),
             [](const std::pair<NodeType, size_t>& a, const std::pair<NodeType, size_t>& b) {
                 return a.second != b.second ? a.second > b.second : a.first < b.first;
             });
@@ -322,7 +362,9 @@ class DirectedGraph {
 
     void Graph() {
         adj_list.max_load_factor(0.25);
+        adj_list.reserve(1048576);
         reachable_map.max_load_factor(0.25);
+        reachable_map.reserve(1048576);
     }
 
     size_t GetPubCount() const {
@@ -338,17 +380,15 @@ class DirectedGraph {
     }
 
  private:
-    std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>> adj_list;
-
+    mutable std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>> adj_list;
     mutable std::vector<NodeType> sorted_keys;
     mutable std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> reachable_map;
     mutable std::vector<std::pair<NodeType, size_t>> reachable_counts;
     mutable bool is_sorted = false;
+    mutable std::mutex log_mtx; 
 
     size_t publisher_count = 0;
     size_t node_count = 0;
-
-    std::mutex mtx; 
 
     // Sorts the keys only once unless the graph changes
     void SortKeys() const {
@@ -377,73 +417,149 @@ class DirectedGraph {
         is_sorted = true;
     }
 
-    void BFSUpdateReachable(const NodeType& key, const std::string& mode,
-                            std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>>& local_reachable_map,
-                            std::pair<NodeType, size_t>& local_count) const {
-        std::unordered_map<NodeType, float> weight_map;
-        std::unordered_map<NodeType, float> edge_map;
-        std::unordered_set<NodeType> visited;
-        std::queue<NodeType> q;
+    void BFSUpdateReachable(const NodeType& source_node,
+                            const std::string& mode,
+                            std::unordered_map<NodeType, 
+                                            std::vector<std::tuple<NodeType, float, float>>>& reachable_nodes_map,
+                            std::pair<NodeType, size_t>& node_statistics) const {
+        // 節點數據結構
+        struct NodeData {
+            float edge_weight;
+            float accumulated_weight;
+            bool visited;
+            bool used;
+            
+            NodeData() : 
+                edge_weight(0.0f), 
+                accumulated_weight(0.0f), 
+                visited(false), 
+                used(false) {}
+                
+            NodeData(float ew, float aw, bool v, bool u) :
+                edge_weight(ew),
+                accumulated_weight(aw),
+                visited(v),
+                used(u) {}
+        };
 
-        // 預先分配記憶體來減少 rehash
-        weight_map.reserve(adj_list.size());
-        edge_map.reserve(adj_list.size());
-        visited.reserve(adj_list.size());
+        // 本地存儲（非靜態以保證線程安全）
+        std::unordered_map<NodeType, int> node_to_id;
+        std::vector<NodeType> id_to_node;
+        std::vector<NodeData> node_data_vec;
+        
+        // 預留足夠空間減少重新分配
+        const size_t estimated_size = adj_list.size() * 2;
+        node_to_id.reserve(estimated_size);
+        id_to_node.reserve(estimated_size);
+        node_data_vec.resize(estimated_size);
 
-        weight_map[key] = 0.0f;
-        edge_map[key] = 0.0f;
+        // 優化：預先計算模式比較結果
+        const bool is_max_mode = (mode == "max");
 
-        auto it = adj_list.find(key);
-        if (it != adj_list.end()) {
-            for (const auto& [neighbor, edge_weight] : it->second) {
-                weight_map[neighbor] = edge_weight;
-                edge_map[neighbor] = edge_weight;
-                q.push(neighbor);
-                visited.insert(neighbor);
+        // 獲取或分配節點ID的lambda函數
+        auto get_or_assign_id = [&](const NodeType& node) -> int {
+            const auto it = node_to_id.find(node);
+            if (it != node_to_id.end()) {
+                return it->second;
+            }
+
+            const int new_id = static_cast<int>(id_to_node.size());
+            node_to_id[node] = new_id;
+            id_to_node.push_back(node);
+            
+            // 確保有足夠空間
+            if (new_id >= static_cast<int>(node_data_vec.size())) {
+                node_data_vec.resize(new_id + 1);
+            }
+            return new_id;
+        };
+
+        // 處理源節點
+        const int src_id = get_or_assign_id(source_node);
+        node_data_vec[src_id] = NodeData(0.0f, 0.0f, false, true);
+
+        std::deque<int> traversal_queue;
+
+        // 初始化鄰居節點
+        const auto source_it = adj_list.find(source_node);
+        if (source_it != adj_list.end()) {
+            for (const auto& neighbor_pair : source_it->second) {
+                const int neighbor_id = get_or_assign_id(neighbor_pair.first);
+                node_data_vec[neighbor_id] = NodeData(
+                    neighbor_pair.second, 
+                    neighbor_pair.second, 
+                    true,  // visited
+                    true   // used
+                );
+                traversal_queue.push_back(neighbor_id);
             }
         }
 
-        while (!q.empty()) {
-            NodeType current = q.front();
-            q.pop();
-            float current_weight = weight_map[current];
+        // BFS 主循環
+        while (!traversal_queue.empty()) {
+            const int curr_id = traversal_queue.front();
+            traversal_queue.pop_front();
 
-            auto neighbor_it = adj_list.find(current);
-            if (neighbor_it == adj_list.end()) continue;
+            const NodeType& current_node = id_to_node[curr_id];
+            const float current_acc_weight = node_data_vec[curr_id].accumulated_weight;
 
-            for (const auto& [neighbor, edge_weight] : neighbor_it->second) {
-                if (neighbor == key) continue;
+            const auto it = adj_list.find(current_node);
+            if (it == adj_list.end()) continue;
 
-                float total_weight = current_weight + edge_weight;
+            // 處理所有鄰居節點
+            for (const auto& neighbor_pair : it->second) {
+                const NodeType& neighbor = neighbor_pair.first;
+                if (neighbor == source_node) continue;
 
-                auto weight_it = weight_map.find(neighbor);
-                bool should_update = (weight_it == weight_map.end()) ||
-                                    (mode == "min" && total_weight < weight_it->second) ||
-                                    (mode == "max" && total_weight > weight_it->second);
+                const float edge_weight = neighbor_pair.second;
+                const float total_weight = current_acc_weight + edge_weight;
+                const int neighbor_id = get_or_assign_id(neighbor);
 
-                if (should_update) {
-                    weight_map[neighbor] = total_weight;
-                    edge_map[neighbor] = edge_weight;
-                    
-                    if (visited.insert(neighbor).second) {  // 使用 insert() 的回傳值來減少查找次數
-                        q.push(neighbor);
+                NodeData& data = node_data_vec[neighbor_id];
+                bool need_update = false;
+
+                if (!data.used) {
+                    need_update = true;
+                } else if (is_max_mode && total_weight > data.accumulated_weight) {
+                    need_update = true;
+                }
+
+                if (need_update) {
+                    data.accumulated_weight = total_weight;
+                    data.edge_weight = edge_weight;
+                    if (!data.visited) {
+                        data.visited = true;
+                        traversal_queue.push_back(neighbor_id);
                     }
+                    data.used = true;
                 }
             }
         }
 
-        std::vector<std::tuple<NodeType, float, float>> result;
-        result.reserve(weight_map.size());
+        // 收集可達節點
+        std::vector<std::tuple<NodeType, float, float>> reachable_nodes;
+        reachable_nodes.reserve(id_to_node.size() - 1);  // 減去源節點
 
-        for (const auto& [node, acc_weight] : weight_map) {
-            if (node == key) continue;
-            result.emplace_back(node, edge_map.at(node), acc_weight);
+        for (size_t i = 0; i < id_to_node.size(); ++i) {
+            if (static_cast<int>(i) == src_id) continue;
+            
+            const NodeData& data = node_data_vec[i];
+            if (!data.used) continue;
+
+            reachable_nodes.emplace_back(
+                id_to_node[i],
+                data.edge_weight,
+                data.accumulated_weight
+            );
         }
 
-        local_reachable_map[key] = std::move(result);
-        local_count = {key, weight_map.size() - 1};
+        // 保存結果
+        reachable_nodes_map[source_node] = std::move(reachable_nodes);
+        node_statistics = std::make_pair(
+            source_node, 
+            node_data_vec[src_id].used ? id_to_node.size() - 1 : 0
+        );
     }
-
 };
 
 /**
