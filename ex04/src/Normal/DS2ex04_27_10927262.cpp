@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex03_27_10927262.cpp
  * @brief A program that implements hash tables with linear probing and double hashing to efficiently manage and organize graduate student data.
- * @version 1.3.0
+ * @version 1.4.0
  *
  * @details
  * This program implements two different hashing techniques, linear probing and double hashing, for storing and managing graduate student data. 
@@ -28,6 +28,7 @@
 #include <sstream>     // String streams (istringstream, ostringstream)
 #include <string>      // String class and operations
 #include <thread>      // Thread support (std::thread)
+#include <utility>
 #include <vector>      // Dynamic array container
 #include <queue>
 #include <deque>
@@ -40,17 +41,29 @@
 #include <cstdlib>     // General utilities (malloc, exit, atoi)
 #include <cstring>     // C-style string operations (strcpy, memcmp)
 
-#define COLUMNS 6     // Number of scores for each student.
 #define MAX_LEN 12    // Array size of student id and name.
-#define BIG_INT 255   // Integer upper bound.
+#define FAST_IO() \
+    std::ios_base::sync_with_stdio(false); \
+    std::cin.tie(nullptr); \
+    std::cout.tie(nullptr);
+
+#if defined(__GNUC__)
+    #pragma GCC optimize("O3")
+    #define COMPILER "GCC"
+#elif defined(_MSC_VER)
+    #pragma optimize("", on)
+    #define COMPILER "MSVC"
+#else
+    #define COMPILER "Unknown Compiler"
+#endif
 
 #ifdef DEBUG
     // Thread-safe debug logging
-    #define THREAD_LOG(msg) { std::lock_guard<std::mutex> lock(log_mtx); \
-                             std::cout << "[THREAD] " << msg << '\n'; }
+    #define DEBUG_LOG(msg) { std::lock_guard<std::mutex> lock(log_mtx); \
+                             std::cout << "[DEBUG] " << msg << '\n'; }
 #else
     // Expands to nothing in non-DEBUG builds (no runtime overhead) 
-    #define THREAD_LOG(msg)   
+    #define DEBUG_LOG(msg)   
 #endif
 
 /**
@@ -64,22 +77,28 @@ typedef struct st {
 } StudentType;
 
 class ThreadPool {
-public:
+ public:
     explicit ThreadPool(size_t threads, size_t batch_size = 1)
         : stop(false), busy_threads(0), batch_size(batch_size) {
         for (size_t i = 0; i < threads; ++i) {
             workers.emplace_back([this, i, batch_size] {
-                THREAD_LOG("Worker thread " << i << " started");
+                #ifdef DEBUG
+                    DEBUG_LOG("Worker thread " << i << " started");
+                #endif
                 for (;;) {
                     std::vector<std::function<void()>> task_batch;
 
                     {
                         std::unique_lock<std::mutex> lock(queue_mutex);
-                        THREAD_LOG("Worker thread " << i << " waiting for tasks");
+                        #ifdef DEBUG
+                            DEBUG_LOG("Worker thread " << i << " waiting for tasks");
+                        #endif
                         condition.wait(lock, [this] { return stop || !tasks.empty(); });
 
                         if (stop && tasks.empty()) {
-                            THREAD_LOG("Worker thread " << i << " terminating");
+                        #ifdef DEBUG
+                            DEBUG_LOG("Worker thread " << i << " terminating");
+                        #endif
                             return;
                         }
 
@@ -90,24 +109,32 @@ public:
                             tasks.pop();
                         }
                         busy_threads += count;
-                        THREAD_LOG("Worker thread " << i << " got batch of " << count
+                        #ifdef DEBUG
+                            DEBUG_LOG("Worker thread " << i << " got batch of " << count
                                     << " tasks (busy: " << busy_threads << ")");
+                        #endif
                     }
 
                     // 執行任務
                     for (auto& task : task_batch) {
-                        auto start = std::chrono::steady_clock::now();
+                        #ifdef DEBUG
+                            auto start = std::chrono::steady_clock::now();
+                        #endif
                         task();
-                        auto end = std::chrono::steady_clock::now();
-                        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-                        THREAD_LOG("Worker thread " << i << " completed task in "
+                        #ifdef DEBUG
+                            auto end = std::chrono::steady_clock::now();
+                            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+                            DEBUG_LOG("Worker thread " << i << " completed task in "
                                     << duration.count() << "ms");
+                        #endif
                     }
 
                     {
                         std::unique_lock<std::mutex> lock(queue_mutex);
                         busy_threads -= task_batch.size();
-                        THREAD_LOG("Worker thread " << i << " batch done (busy: " << busy_threads << ")");
+                        #ifdef DEBUG
+                            DEBUG_LOG("Worker thread " << i << " batch done (busy: " << busy_threads << ")");
+                        #endif
                         cv_finished.notify_all();
                     }
                 }
@@ -142,7 +169,7 @@ public:
         }
     }
 
-private:
+ private:
     std::vector<std::thread> workers;
     std::queue<std::function<void()>> tasks;
 
@@ -162,18 +189,15 @@ class DirectedGraph {
  public:
     // Add a directed edge: publisher -> subscriber with given weight
     void AddEdge(const NodeType& publisher, const NodeType& subscriber, float weight) {
-        bool is_new_publisher = adj_list.find(publisher) == adj_list.end();
-        bool is_new_subscriber = adj_list.find(subscriber) == adj_list.end();
+        bool is_new_publisher = adj_list.try_emplace(publisher).second;
+        bool is_new_subscriber = adj_list.try_emplace(subscriber).second;
 
         adj_list[publisher].emplace_back(subscriber, weight);
         ++node_count;
 
         if (adj_list[publisher].size() == 1) {
             ++publisher_count;
-        }
-
-        if (is_new_subscriber) {
-            adj_list[subscriber] = {};
+            publisher_list.push_back(std::make_pair(publisher, 0));
         }
 
         if (is_new_publisher) {
@@ -196,7 +220,8 @@ class DirectedGraph {
         std::ostringstream buffer;
         buffer << "<<< There are " << publisher_count << " IDs in total. >>>\n";
 
-        for (const NodeType& publisher : sorted_keys) {
+        for (const auto& pair : publisher_list) {
+            const NodeType& publisher = pair.first;
             auto it = adj_list.find(publisher);
             if (it == adj_list.end() || it->second.empty()) continue;
 
@@ -240,9 +265,10 @@ class DirectedGraph {
 
         std::ostringstream buffer;
 
-        buffer << "<<< There are " << reachable_counts.size() << " IDs in total. >>>\n";
+        buffer << "<<< There are " << publisher_list.size() << " IDs in total. >>>\n";
 
-        for (const auto& key : sorted_keys) {
+        for (const auto& pair : publisher_list) {
+            const auto& key = pair.first;
             std::vector<std::tuple<NodeType, float, float>>& vec = reachable_map.at(key);
 
             std::stable_sort(vec.begin(), vec.end(),
@@ -251,12 +277,12 @@ class DirectedGraph {
                 });
         }
 
-        for (size_t i = 0; i < reachable_counts.size(); ++i) {
-            const NodeType& key = reachable_counts[i].first;
+        for (size_t i = 0; i < publisher_list.size(); ++i) {
+            const NodeType& key = publisher_list[i].first;
 
             const std::vector<std::tuple<NodeType, float, float>>& reachables = reachable_map.at(key);
 
-            buffer << "[" << std::setw(3) << i + 1 << "] " << key << "(" << reachable_counts[i].second << "): \n";
+            buffer << "[" << std::setw(3) << i + 1 << "] " << key << "(" << publisher_list[i].second << "): \n";
 
             size_t line_counter = 1;
             for (size_t j = 0; j < reachables.size(); ++j) {
@@ -277,19 +303,18 @@ class DirectedGraph {
     }
 
     void ComputeAllConnectionCounts(const std::string& mode) {
-        reachable_map.clear();
-        reachable_counts.clear();
-
-        auto start_time = std::chrono::steady_clock::now();
-        THREAD_LOG("Starting ComputeAllConnectionCounts with " 
-                << std::thread::hardware_concurrency() << " threads");
+        #ifdef DEBUG
+            auto start_time = std::chrono::steady_clock::now();
+            DEBUG_LOG("Starting ComputeAllConnectionCounts with " 
+                    << std::thread::hardware_concurrency() << " threads");
+        #endif
 
         {
             ThreadPool pool(std::thread::hardware_concurrency());
             std::mutex results_mutex;
 
-            const size_t mini_batch_size = 8;  // 調整這裡看效能效果
-            size_t total_keys = sorted_keys.size();
+            const size_t mini_batch_size = 8;  // 可根據實際情況調整
+            size_t total_keys = publisher_list.size();
             size_t task_count = 0;
 
             for (size_t i = 0; i < total_keys; i += mini_batch_size) {
@@ -298,14 +323,16 @@ class DirectedGraph {
 
                 task_count++;
                 pool.Enqueue([&, start_idx, end_idx]() {
+                #ifdef DEBUG
                     auto task_start = std::chrono::steady_clock::now();
-                    THREAD_LOG("Mini batch processing keys " << start_idx << " to " << (end_idx - 1));
+                    DEBUG_LOG("Mini batch processing keys " << start_idx << " to " << (end_idx - 1));
+                #endif
 
                     std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> local_map;
                     std::vector<std::pair<NodeType, size_t>> local_counts;
 
                     for (size_t j = start_idx; j < end_idx; ++j) {
-                        NodeType key = sorted_keys[j];
+                        NodeType key = publisher_list[j].first;
                         std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> temp_map;
                         std::pair<NodeType, size_t> temp_count;
                         BFSUpdateReachable(key, mode, temp_map, temp_count);
@@ -321,26 +348,41 @@ class DirectedGraph {
                         for (auto& pair : local_map) {
                             reachable_map[pair.first] = std::move(pair.second);
                         }
-                        reachable_counts.insert(reachable_counts.end(), local_counts.begin(), local_counts.end());
+                        
+                        for (const auto& new_pair : local_counts) {
+                            auto it = std::find_if(publisher_list.begin(), publisher_list.end(),
+                                                [&new_pair](const auto& pair) { return pair.first == new_pair.first; });
+
+                            if (it != publisher_list.end()) {
+                                it->second += new_pair.second; // 更新 second
+                            } else {
+                                publisher_list.push_back(new_pair); // 插入新值
+                            }
+                        }
                     }
 
-                    auto task_end = std::chrono::steady_clock::now();
-                    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(task_end - task_start);
-                    THREAD_LOG("Completed mini batch [" << start_idx << ", " << end_idx - 1 << "] in " << duration.count() << "ms");
+                    #ifdef DEBUG
+                        auto task_end = std::chrono::steady_clock::now();
+                        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(task_end - task_start);
+                        DEBUG_LOG("Completed mini batch [" << start_idx << ", " << end_idx - 1 << "] in " << duration.count() << "ms");
+                    #endif
                 });
             }
 
-            THREAD_LOG("Enqueued " << task_count << " mini batch tasks for processing");
+            #ifdef DEBUG
+                DEBUG_LOG("Enqueued " << task_count << " mini batch tasks for processing");
+            #endif
             pool.WaitAll();
         }
 
-        auto end_time = std::chrono::steady_clock::now();
-        auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+        #ifdef DEBUG
+            auto end_time = std::chrono::steady_clock::now();
+            auto total_duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+            DEBUG_LOG("ComputeAllConnectionCounts completed in " << total_duration.count() << "ms");
+            DEBUG_LOG("Processed " << publisher_list.size() << " nodes");
+        #endif
 
-        THREAD_LOG("ComputeAllConnectionCounts completed in " << total_duration.count() << "ms");
-        THREAD_LOG("Processed " << reachable_counts.size() << " nodes");
-
-        std::sort(reachable_counts.begin(), reachable_counts.end(),
+        std::sort(publisher_list.begin(), publisher_list.end(),
             [](const std::pair<NodeType, size_t>& a, const std::pair<NodeType, size_t>& b) {
                 return a.second != b.second ? a.second > b.second : a.first < b.first;
             });
@@ -352,9 +394,8 @@ class DirectedGraph {
 
     void Clear() {
         adj_list.clear();
-        sorted_keys.resize(0);
         reachable_map.clear();
-        reachable_counts.resize(0);
+        publisher_list.resize(0);
         is_sorted = false;
         publisher_count = 0;
         node_count = 0;
@@ -376,14 +417,13 @@ class DirectedGraph {
     }
 
     size_t GetReachCount() const {
-        return reachable_counts.size();
+        return publisher_list.size();
     }
 
  private:
     mutable std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>> adj_list;
-    mutable std::vector<NodeType> sorted_keys;
     mutable std::unordered_map<NodeType, std::vector<std::tuple<NodeType, float, float>>> reachable_map;
-    mutable std::vector<std::pair<NodeType, size_t>> reachable_counts;
+    mutable std::vector<std::pair<NodeType, size_t>> publisher_list;
     mutable bool is_sorted = false;
     mutable std::mutex log_mtx; 
 
@@ -394,24 +434,24 @@ class DirectedGraph {
     void SortKeys() const {
         if (is_sorted) return;
 
-        sorted_keys.resize(0);
-        sorted_keys.reserve(adj_list.size());
-
-        for (const auto& pair : adj_list) {
-            sorted_keys.push_back(pair.first);
-        }
-
-        if (sorted_keys.size() < 10000) {
-            std::sort(sorted_keys.begin(), sorted_keys.end());
+        // **直接排序**
+        if (publisher_list.size() < 10000) {
+            std::sort(publisher_list.begin(), publisher_list.end(), 
+                [](const auto& a, const auto& b) { return a.first < b.first; });
         } else {
-            auto mid = sorted_keys.begin() + sorted_keys.size() / 2;
-            std::vector<NodeType> left(sorted_keys.begin(), mid);
-            std::vector<NodeType> right(mid, sorted_keys.end());
+            // **手動分割**
+            auto mid = publisher_list.begin() + publisher_list.size() / 2;
+            std::vector<std::pair<NodeType, size_t>> left(publisher_list.begin(), mid);
+            std::vector<std::pair<NodeType, size_t>> right(mid, publisher_list.end());
 
-            std::sort(left.begin(), left.end());
-            std::sort(right.begin(), right.end());
+            std::sort(left.begin(), left.end(), 
+                [](const auto& a, const auto& b) { return a.first < b.first; });
 
-            std::merge(left.begin(), left.end(), right.begin(), right.end(), sorted_keys.begin());
+            std::sort(right.begin(), right.end(), 
+                [](const auto& a, const auto& b) { return a.first < b.first; });
+
+            std::merge(left.begin(), left.end(), right.begin(), right.end(), publisher_list.begin(),
+                [](const auto& a, const auto& b) { return a.first < b.first; });
         }
 
         is_sorted = true;
@@ -420,7 +460,7 @@ class DirectedGraph {
     void BFSUpdateReachable(const NodeType& source_node,
                             const std::string& mode,
                             std::unordered_map<NodeType, 
-                                            std::vector<std::tuple<NodeType, float, float>>>& reachable_nodes_map,
+                                std::vector<std::tuple<NodeType, float, float>>>& reachable_nodes_map,
                             std::pair<NodeType, size_t>& node_statistics) const {
         // 節點數據結構
         struct NodeData {
@@ -651,9 +691,7 @@ static void Task2(DirectedGraph<std::string>& dir_graph, const std::string& file
  * @return int Returns 0 on normal program termination.
  */
 int main() {
-    std::ios_base::sync_with_stdio(false);
-    std::cin.tie(nullptr);
-    std::cout.tie(nullptr);
+    FAST_IO();
 
     int select_command = 0;
     std::string file_number;
