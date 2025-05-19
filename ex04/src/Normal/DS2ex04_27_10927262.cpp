@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex04_27_10927262.cpp
  * @brief A program that implements a directed graph with weighted edges and parallel processing capabilities.
- * @version 1.5.1
+ * @version 1.5.2
  *
  * @details
  * This program implements a directed graph data structure that supports:
@@ -482,38 +482,33 @@ class DirectedGraph {
 
             auto graph_node = reachable_vec.find(key);
             if (graph_node != reachable_vec.end()) {
-                std::vector<std::vector<NodeType>>& all_paths = graph_node->second;
+                std::vector<NodeType>& nodes = graph_node->second;
 
                 // Sort each path for consistent output
-                for (auto& path : all_paths) {
-                    std::stable_sort(path.begin(), path.end(),
-                        [](const NodeType& first, const NodeType& second) {
-                            return first < second;  // Sort nodes in path
-                        });
-                }
+                std::stable_sort(nodes.begin(), nodes.end(),
+                    [](const NodeType& first, const NodeType& second) {
+                        return first < second;  // Sort nodes in path
+                    });
 
                 // Format publisher header with connection count
                 buffer << "[" << std::setw(3) << i + 1 << "] " << key
                        << "(" << publisher_list[i].second << "): \n";
 
                 // Format output with 12 items per line
-                size_t path_idx = 1;
-                for (const auto& path : all_paths) {
-                    size_t line_counter = 1;
+                size_t line_counter = 1;
 
-                    // Format nodes in path
-                    for (size_t j = 0; j < path.size(); ++j) {
-                        buffer << "\t(" << std::setw(2) << j + 1 << ") " << path[j];
+                // Format nodes in path
+                for (size_t j = 0; j < nodes.size(); ++j) {
+                    buffer << "\t(" << std::setw(2) << j + 1 << ") " << nodes[j];
 
-                        // New line every 12 items
-                        if (line_counter++ == 12) {
-                            buffer << '\n';
-                            line_counter = 1;
-                        }
+                    // New line every 12 items
+                    if (line_counter++ == 12) {
+                        buffer << '\n';
+                        line_counter = 1;
                     }
-
-                    buffer << '\n';  // End of path
                 }
+
+                buffer << '\n';  // End of nodes
             }
         }
 
@@ -754,7 +749,7 @@ class DirectedGraph {
 
     // Member variables with descriptions
     mutable std::unordered_map<NodeType, std::vector<std::pair<NodeType, float>>> adj_list;
-    mutable std::unordered_map<NodeType, std::vector<std::vector<NodeType>>> reachable_vec;
+    mutable std::unordered_map<NodeType, std::vector<NodeType>> reachable_vec;
     mutable std::vector<std::pair<NodeType, size_t>> publisher_list;
     mutable std::mutex log_mtx;  // Mutex for thread-safe logging
 
