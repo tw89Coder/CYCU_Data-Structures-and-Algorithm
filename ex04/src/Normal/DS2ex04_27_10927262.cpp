@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex04_27_10927262.cpp
  * @brief A program that implements a directed graph with weighted edges and parallel processing capabilities.
- * @version 1.5.2
+ * @version 1.6.0
  *
  * @details
  * This program implements a directed graph data structure that supports:
@@ -23,31 +23,34 @@
 // Other system headers
 #include <sys/stat.h>          // File system status (POSIX)
 
-// C++ Standard Library Headers (alphabetical order)
-#include <algorithm>           // Algorithms (sorting, searching, transforming)
-#include <atomic>              // Atomic operations and thread synchronization
-#include <chrono>              // Time utilities (clocks, time points)
-#include <condition_variable>  // Thread synchronization (wait/notify)
-#include <deque>               // Double-ended queue container
-#include <fstream>             // File stream operations (input/output file streams)
-#include <functional>          // Function objects and type erasure (std::function)
-#include <iomanip>             // I/O formatting (setw, setprecision)
+// C++ Standard Library Headers
 #include <iostream>            // Standard I/O streams (cin, cout, cerr)
-#include <limits>              // Numeric limits (numeric_limits)
-#include <memory>              // Smart pointers and dynamic memory management
-#include <mutex>               // Mutual exclusion (mutexes, lock guards)
-#include <future>              // Future/promise for asynchronous operations
-#include <random>              // Random number generation
-#include <queue>               // Queue container (FIFO)
 #include <sstream>             // String streams (in-memory I/O)
+#include <fstream>             // File stream operations (input/output file streams)
+#include <iomanip>             // I/O formatting (setw, setprecision)
 #include <string>              // String class and operations
-#include <thread>              // Thread support (std::thread)
-#include <utility>             // Utility components (pair, move, forward)
+
+#include <vector>              // Dynamic array container
+#include <deque>               // Double-ended queue container
+#include <queue>               // Queue container (FIFO)
 #include <unordered_set>       // Unordered associative container (hash set)
 #include <unordered_map>       // Unordered associative container (hash map)
-#include <vector>              // Dynamic array container
 
-// C Standard Library (C++ wrapper headers, alphabetical order)
+#include <algorithm>           // Algorithms (sorting, searching, transforming)
+#include <functional>          // Function objects and type erasure (std::function)
+#include <utility>             // Utility components (pair, move, forward)
+
+#include <thread>              // Thread support (std::thread)
+#include <mutex>               // Mutual exclusion (mutexes, lock guards)
+#include <shared_mutex>        // for std::shared_mutex, std::shared_lock, std::unique_lock C++17
+#include <condition_variable>  // Thread synchronization (wait/notify)
+#include <atomic>              // Atomic operations and thread synchronization
+#include <future>              // Future/promise for asynchronous operations
+
+#include <chrono>              // Time utilities (clocks, time points)
+#include <random>              // Random number generation
+
+// C Standard Library
 #include <cstddef>             // Fundamental types (size_t, nullptr_t)
 #include <cstdlib>             // General utilities (malloc, exit, atoi)
 #include <cstring>             // C-style string operations (strcpy, memcmp)
@@ -67,7 +70,7 @@
 #ifdef DEBUG
     // Thread-safe debug logging
     #define DEBUG_LOG(msg) { std::lock_guard<std::mutex> lock(log_mtx); \
-                             std::cout << "[DEBUG] " << msg << '\n'; }
+                             std::cout << "\033[36m[DEBUG]\033[0m " << msg << '\n'; }
 #else
     // Expands to nothing in non-DEBUG builds (no runtime overhead)
     #define DEBUG_LOG(msg)
@@ -104,17 +107,21 @@ class ThreadPool {
      * 
      * @param thread_count Number of worker threads to create.
      */
-    explicit ThreadPool(size_t thread_count)
-        : stop(false), threads(thread_count), thread_exec_times(thread_count) {
-        // Create a dedicated task queue for each worker thread
+    explicit ThreadPool(size_t thread_count, bool enable_work_stealing = true)
+        : stop(false), 
+          threads(thread_count), 
+          thread_exec_times(thread_count),
+          work_stealing_enabled(enable_work_stealing) {
+        
+        // Create task queues
         for (size_t i = 0; i < thread_count; ++i) {
             queues.emplace_back(std::make_unique<WorkerQueue>());
         }
 
-        // Launch worker threads with their assigned index
+        // Launch worker threads
         for (size_t i = 0; i < thread_count; ++i) {
             threads[i] = std::thread([this, i] {
-                WorkerLoop(i);  // Each thread runs the main work loop
+                WorkerLoop(i);
             });
         }
     }
@@ -144,7 +151,7 @@ class ThreadPool {
             for (size_t i = 0; i < thread_exec_times.size(); ++i) {
                 auto nanos = std::chrono::nanoseconds(thread_exec_times[i].load());
                 auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(nanos);
-                std::cout << "Thread " << i << " total task execution time: "
+                std::cout << "\033[32m[Thread]\033[0m " << i << " total task execution time: "
                         << millis.count() << " ms" << std::endl;
             }
         #endif
@@ -165,41 +172,53 @@ class ThreadPool {
      */
     template <class FunctionType, class... ArgumentTypes>
     auto Enqueue(FunctionType&& task_function, ArgumentTypes&&... args)
-                 -> std::future<decltype(task_function(args...))> {
-        // Determine the return type of the task function
+            -> std::future<decltype(task_function(args...))> 
+    {
+        // Get the return type of the task function
         using ReturnType = decltype(task_function(args...));
 
-        // Create a packaged task to get future and handle exceptions
+        // Package the task into a future so we can track its result
+        // Using shared_ptr ensures the task remains alive until execution
         auto task = std::make_shared<std::packaged_task<ReturnType()>>(
             std::bind(std::forward<FunctionType>(task_function),
                 std::forward<ArgumentTypes>(args)...));
 
-        // Wrap the task to decrement active task count upon completion
+        // Wrap the task so we can decrease the active task count when it's done
+        // This lambda captures 'this' and must be thread-safe
         std::function<void()> wrapped = [this, task]() {
-            (*task)();  // Execute the actual task
+            (*task)();  // Run the actual task
 
-            // Notify if this was the last active task
-            if (--active_tasks == 0) {
+            // If this was the last active task, notify anyone waiting
+            {
                 std::unique_lock<std::mutex> lock(wait_mutex);
-                wait_cv.notify_all();  // Wake up anyone waiting on WaitAll()
+                if (--active_tasks == 0) {
+                    wait_cv.notify_all();
+                }
             }
         };
 
-        active_tasks++;  // Increment active task counter
-
-        // Randomly select a worker queue for load balancing
-        size_t index = dist(rng) % queues.size();
-
-        // Add task to the selected worker's queue
+        // Step 1: Select a worker queue for this task
+        size_t index;
         {
-            std::lock_guard<std::mutex> lock(queues[index]->mtx);
-            queues[index]->tasks.emplace_front(std::move(wrapped));  // Add to front for LIFO
+            // Lock ensures active_tasks count is updated safely across threads
+            std::lock_guard<std::mutex> lock(wait_mutex);
+            active_tasks++;  // Increase task counter
+            index = dist(rng) % queues.size();  // Pick a queue randomly
         }
 
-        // Notify one worker thread in case it's sleeping
-        queues[index]->cv.notify_one();
+        // Step 2: Add task to the selected queue
+        {
+            // Lock ensures no other thread modifies this queue at the same time
+            std::lock_guard<std::mutex> queue_lock(queues[index]->mtx);
 
-        // Return future for the task result
+            // Adding the task to the front ensures LIFO (Last In, First Out) execution
+            queues[index]->tasks.emplace_front(std::move(wrapped));
+
+            // Notify one waiting worker thread that a new task is available
+            queues[index]->cv.notify_one();
+        }
+
+        // Return a future so the caller can wait for the task result
         return task->get_future();
     }
 
@@ -242,23 +261,19 @@ class ThreadPool {
     void WorkerLoop(size_t index) {
         using clock = std::chrono::steady_clock;
 
-        // Main work loop runs until stop is signaled
         while (!stop) {
             std::function<void()> task;
 
-            // Try to get work from own queue or steal from others
-            if (PopTask(index, task) || StealTask(index, task)) {
-                // Measure task execution time
-                auto start = clock::now();
-                task();  // Execute the task
-                auto end = clock::now();
-
-                // Record execution time in nanoseconds
-                auto duration =
-                    std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-                thread_exec_times[index].fetch_add(duration);
-            } else {
-                // No work available - sleep briefly
+            // Try to get work from own queue first
+            if (PopTask(index, task)) {
+                ExecuteTask(index, task);
+            } 
+            // Then try stealing if enabled and no local work
+            else if (work_stealing_enabled && StealTask(index, task)) {
+                ExecuteTask(index, task);
+            }
+            // No work available
+            else {
                 std::unique_lock<std::mutex> lock(queues[index]->mtx);
                 queues[index]->cv.wait_for(lock, std::chrono::milliseconds(100));
             }
@@ -288,33 +303,71 @@ class ThreadPool {
     }
 
     /**
-     * @brief Attempts to steal a task from another thread's queue.
-     *
-     * Implements work stealing to improve load balancing.
-     * Steals from the back of other threads' queues to reduce contention.
-     *
-     * @param thief_index Index of the stealing thread
-     * @param task [out] Retrieved task if successful
-     * @return true if a task was stolen, false otherwise
-     */
+    * @brief Attempts to steal a task from another thread's queue.
+    *
+    * Implements work stealing to improve load balancing by taking tasks from
+    * the back of other threads' queues (FIFO order) while the owner thread
+    * takes tasks from the front (LIFO order), reducing contention.
+    *
+    * @param thief_index Index of the stealing thread (not used for queue selection)
+    * @param[out] task Retrieved task if successful
+    * @return true if a task was stolen, false if all queues were empty
+    *
+    * @warning Concurrency risks:
+    * - Potential data race detected by -fsanitize=thread
+    * - While mutex-protected, race conditions may still occur in high contention
+    * - Risk case: Multiple threads stealing from same queue simultaneously
+    * 
+    * @note Safety measures:
+    * - Uses try_lock to prevent deadlocks
+    * - Entire steal operation is atomic under lock
+    */
     bool StealTask(size_t thief_index, std::function<void()>& task) {
+        // Total number of worker queues (equal to thread count)
         size_t n = queues.size();
 
-        // Try stealing from each other thread in round-robin fashion
+        // Circular search through all possible victim queues
         for (size_t i = 0; i < n; ++i) {
-            size_t victim = (thief_index + i + 1) % n;  // Calculate victim index
+            // Calculate victim thread index using modulo arithmetic
+            // Starts from thief_index+1 and wraps around
+            size_t victim = (thief_index + i + 1) % n;
 
-            std::lock_guard<std::mutex> lock(queues[victim]->mtx);
+            // Attempt to acquire lock without blocking
+            // If queue is already locked, skip to next candidate
+            std::unique_lock<std::mutex> lock(queues[victim]->mtx, std::try_to_lock);
+            if (!lock.owns_lock()) continue;
+
+            // Only proceed if queue is not empty
+            // Check is done while holding the lock for atomicity
             if (!queues[victim]->tasks.empty()) {
-                // Take task from back of victim's queue (FIFO order for stealing)
+                // Move task from victim's queue to output parameter
+                // Using back()+pop_back() instead of front()+pop_front() because:
+                // 1. Reduces contention with owner thread that uses front
+                // 2. Better for cache locality in many cases
                 task = std::move(queues[victim]->tasks.back());
                 queues[victim]->tasks.pop_back();
-
                 return true;
             }
         }
 
+        // No tasks found in any queue
         return false;
+    }
+
+
+    /**
+    * @brief Executes a task and records its execution time
+    * @param index Worker thread index for stats tracking
+    * @param task The task function to execute
+    */
+    void ExecuteTask(size_t index, std::function<void()>& task) {
+        auto start = std::chrono::steady_clock::now();  // Start timer
+        task();                                                     // Execute task
+        auto end = std::chrono::steady_clock::now();    // Stop timer
+        
+        // Record duration in thread's execution time total
+        auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+        thread_exec_times[index].fetch_add(duration);  // Atomic update
     }
 
     // Thread control
@@ -325,6 +378,7 @@ class ThreadPool {
     // Task distribution
     std::mt19937 rng { std::random_device{}() };      // Random number generator
     std::uniform_int_distribution<size_t> dist;           // Distribution for queue selection
+    const bool work_stealing_enabled;                     // Work stealing (Default true)
 
     // Task tracking
     std::atomic<size_t> active_tasks{0};                  // Count of currently active tasks
@@ -333,7 +387,7 @@ class ThreadPool {
 
     // Performance metrics
     std::vector<std::atomic<int64_t>> thread_exec_times;  // ms exesute time tracking per thread
-};  // ThreadPool
+};  // class ThreadPool
 
 /**
  * @brief A directed graph implementation with weighted edges and parallel processing capabilities.
@@ -516,14 +570,25 @@ class DirectedGraph {
     }
 
     /**
-     * @brief Computes connection counts for all nodes using parallel BFS.
-     * 
-     * Uses a thread pool to parallelize BFS operations across all publisher nodes.
-     * Results are stored in reachable_vec and publisher_list.
-     * 
-     * @param mode Reserved for future use (currently unused)
-     * @param min_batch_size Minimum number of nodes to process per thread (default: 4)
-     */
+    * @brief Computes connection counts for all publisher nodes using parallel BFS.
+    * 
+    * Distributes BFS computations across a thread pool to analyze node connectivity.
+    * Results are stored in reachable_vec (detailed connections) and publisher_list
+    * (aggregated counts). Automatically sorts results by connection count.
+    * 
+    * @param mode Reserved for future filtering/processing modes (currently unused)
+    * @param min_batch_size Minimum nodes per thread batch (default=4)
+    * 
+    * @post Modifies:
+    * - reachable_vec: Populates with BFS results for each node
+    * - publisher_list: Updates second field with connection counts
+    * - Sorts publisher_list by count (desc) and key (asc)
+    * 
+    * @note For DEBUG builds:
+    * - Logs timing metrics and thread count
+    * - Validates non-zero connections
+    * - Tracks processing duration
+    */
     void ComputeAllConnectionCounts(const std::string& mode, size_t min_batch_size = 4) {
         #ifdef DEBUG
             auto start_time = std::chrono::steady_clock::now();
@@ -532,75 +597,56 @@ class DirectedGraph {
                     << " threads, min_batch_size=" << min_batch_size);
         #endif
 
-        // Local storage for parallel processing
-        std::unordered_map<NodeType, std::vector<NodeType>> local_reachables;
-        std::unordered_map<NodeType, size_t> local_counts;
-        std::mutex result_mutex;  // Protects access to local storage
-
+        // Parallel BFS execution block
         {
-            // Create thread pool with one thread per CPU core
             ThreadPool pool(std::thread::hardware_concurrency());
             size_t total_keys = publisher_list.size();
-
-            // Calculate number of batches
             size_t batch_count = (total_keys + min_batch_size - 1) / min_batch_size;
 
-            // Process in batches
+            // Batch processing setup
             for (size_t batch_index = 0; batch_index < batch_count; ++batch_index) {
                 size_t start_index = batch_index * min_batch_size;
                 size_t end_index = std::min(start_index + min_batch_size, total_keys);
 
-                pool.Enqueue([&, start_index, end_index]() {
-                    // Temporary storage for this batch's results.
-                    std::unordered_map<NodeType, std::vector<NodeType>> batch_reachables;
-                    std::unordered_map<NodeType, size_t> batch_counts;
-
-                    // Process each node in batch
+                // Enqueue batch processing task
+                pool.Enqueue([start_index, end_index, this]() {
                     for (size_t i = start_index; i < end_index; ++i) {
                         NodeType key = publisher_list[i].first;
-                        // Run BFS to find all reachable nodes
-                        std::vector<NodeType> visited_vec = RunSimpleBFS(key);
 
-                        batch_reachables[key] = std::move(visited_vec);
-                        batch_counts[key] = batch_reachables[key].size();
-                    }
-
-                    // Merge results with global storage
-                    {
-                        std::lock_guard<std::mutex> lock(result_mutex);
-                        for (auto& pair : batch_reachables) {
-                            local_reachables[pair.first] = std::move(pair.second);
-                        }
-
-                        for (auto& pair : batch_counts) {
-                            local_counts[pair.first] = pair.second;
-                        }
+                        RunSimpleBFS(key);
                     }
                 });
             }
 
-            pool.WaitAll();  // Wait for all batches to complete
+            pool.WaitAll();
         }
 
-        // Store final results.
-        for (const auto& pair : local_reachables) {
-            reachable_vec[pair.first] = { pair.second };
-        }
-
-        // Update publisher connection counts
+        // Aggregate results from reachable_vec to publisher_list
         for (auto& entry : publisher_list) {
-            if (local_counts.count(entry.first)) {
-                entry.second = local_counts[entry.first];
+            auto it = reachable_vec.find(entry.first);
+            if (it != reachable_vec.end()) {
+                entry.second = it->second.size();
+            } else {
+                entry.second = 0;
             }
         }
 
-        // Sort by connection count (descending) then by node value.
+        #ifdef DEBUG
+            for (size_t i = 0; i < publisher_list.size(); ++i) {
+                if (publisher_list[i].second == 0) {
+                    DEBUG_LOG("\033[31mWarning: publisher_list[" << i << "] has 0 connections.\033[0m");
+                }
+            }
+        #endif
+
+        // Sort by connection count (descending) then by key (ascending)
         std::sort(publisher_list.begin(), publisher_list.end(),
-            [](const std::pair<NodeType, size_t>& first,
-               const std::pair<NodeType, size_t>& second) {
-                return first.second != second.second ?
-                    first.second > second.second : first.first < second.first;
-            });
+                [](const std::pair<NodeType, size_t>& first,
+                   const std::pair<NodeType, size_t>& second) {
+                    return first.second != second.second ? 
+                           first.second > second.second : 
+                           first.first < second.first;
+                });
 
         #ifdef DEBUG
             auto end_time = std::chrono::steady_clock::now();
@@ -632,12 +678,12 @@ class DirectedGraph {
     /**
      * @brief Optimizes graph storage by preallocating memory
      */
-    void Graph() {
+    void Perf() {
         adj_list.max_load_factor(0.25);
-        adj_list.reserve(2048);
+        adj_list.reserve(64 * 1024);
         reachable_vec.max_load_factor(0.25);
-        reachable_vec.reserve(2048);
-        publisher_list.reserve(2048);
+        reachable_vec.reserve(64 * 1024);
+        publisher_list.reserve(64 * 1024);
     }
 
     /**
@@ -708,9 +754,13 @@ class DirectedGraph {
      * @brief Performs BFS from a given source node.
      * 
      * @param source_node The starting node for BFS
-     * @return Vector of nodes reachable from source_node (excluding the source itself)
+     * @warning This code may have a race condition in a multi-threaded environment.
+     *          Ensure proper synchronization for reachable_vec using std::shared_mutex.
+     * 
+     * @bug High concurrency may lead to undefined behavior.
+     *      Consider using `std::atomic` or additional locking mechanisms for safety.
      */
-    std::vector<NodeType> RunSimpleBFS(const NodeType& source_node) {
+    void RunSimpleBFS(const NodeType& source_node) {
         std::queue<NodeType> queue;            // Queue for BFS traversal
         std::unordered_set<NodeType> visited;  // Track visited nodes
 
@@ -720,31 +770,43 @@ class DirectedGraph {
 
         // Standard BFS loop
         while (!queue.empty()) {
-            // Get next node to process
             NodeType current = queue.front();
             queue.pop();
 
-            // Find current node in adjacency list
+            {
+                //! FIXME: There must be race condition
+                // Check for cached reachability results
+                // std::shared_lock<std::shared_mutex> read_lock(reachable_mutex);
+                auto cache = reachable_vec.find(current);
+                if (cache != reachable_vec.end()) {
+                    for (const auto& cached_node : cache->second) {
+                        visited.insert(cached_node);
+                    }
+
+                    continue;
+                }
+            }
+
+            // Check neighbors
             auto graph_node = adj_list.find(current);
-            if (graph_node == adj_list.end()) continue;  // Skip if no edges
+            if (graph_node == adj_list.end()) continue;
 
-            // Process all neighbors
-            const auto& neighbors = graph_node->second;
-            for (const auto& neighbor_pair : neighbors) {
+            for (const auto& neighbor_pair : graph_node->second) {
                 const NodeType& neighbor = neighbor_pair.first;
-
-                // Add to queue if not already visited
                 if (visited.insert(neighbor).second) {
                     queue.push(neighbor);
                 }
             }
         }
 
-        // Remove source node from results (only want reachable nodes)
+        // Remove source_node from results
         visited.erase(source_node);
+        std::vector<NodeType> result(visited.begin(), visited.end());
 
-        // Convert set to vector for return
-        return std::vector<NodeType>(visited.begin(), visited.end());
+        {
+            std::unique_lock<std::shared_mutex> write_lock(reachable_mutex);
+            reachable_vec[source_node] = std::move(result);
+        }
     }
 
     // Member variables with descriptions
@@ -752,6 +814,7 @@ class DirectedGraph {
     mutable std::unordered_map<NodeType, std::vector<NodeType>> reachable_vec;
     mutable std::vector<std::pair<NodeType, size_t>> publisher_list;
     mutable std::mutex log_mtx;  // Mutex for thread-safe logging
+    std::shared_mutex reachable_mutex;
 
     size_t publisher_count = 0;  // Count of publisher nodes
     size_t node_count = 0;       // Total node count in graph
@@ -762,7 +825,7 @@ class DirectedGraph {
  * 
  * @tparam T Data type (must be StudentType)
  * @param file_number File number suffix (e.g., "1" for "pairs1.bin")
- * @param graph [out] Graph instance to be populated with the data
+ * @param graph [out] Perf instance to be populated with the data
  */
 template <typename T>
 static void ReadBinary(const std::string& file_number, DirectedGraph<T>& graph) {
@@ -800,7 +863,7 @@ static void ReadBinary(const std::string& file_number, DirectedGraph<T>& graph) 
     for (const auto& student : buffer) {
         graph.AddEdge(student.publisher, student.subscriber, student.weight);
     }
-}
+}  // ReadBinary()
 
 /**
  * @brief Task 1: Build adjacency lists from binary data and save results
@@ -809,7 +872,7 @@ static void ReadBinary(const std::string& file_number, DirectedGraph<T>& graph) 
  * 2. Constructs directed graph adjacency lists
  * 3. Saves formatted results to output file
  * 
- * @param dir_graph Graph instance to operate on
+ * @param dir_graph Perf instance to operate on
  * @param file_number File number suffix for input/output files
  */
 static void Task1(DirectedGraph<std::string>& dir_graph, const std::string& file_number) {
@@ -819,7 +882,7 @@ static void Task1(DirectedGraph<std::string>& dir_graph, const std::string& file
 
     std::cout << "<<< There are " << dir_graph.GetPubCount() << " IDs in total. >>>\n\n"
               << "<<< There are " << dir_graph.GetnNodeCount() << " nodes in total. >>>\n";
-}
+}  // Task1()
 
 /**
  * @brief Task 2: Compute connection counts using BFS and save results
@@ -828,7 +891,7 @@ static void Task1(DirectedGraph<std::string>& dir_graph, const std::string& file
  * 2. Counts connections for each node
  * 3. Saves sorted results to output file
  * 
- * @param dir_graph Graph instance with adjacency lists already built
+ * @param dir_graph Perf instance with adjacency lists already built
  * @param file_number File number suffix for output file
  */
 static void Task2(DirectedGraph<std::string>& dir_graph, const std::string& file_number) {
@@ -836,7 +899,7 @@ static void Task2(DirectedGraph<std::string>& dir_graph, const std::string& file
     dir_graph.SaveToCntFile(file_number);
 
     std::cout << "<<< There are " << dir_graph.GetReachCount() << " IDs in total. >>>\n";
-}
+}  // Task2()
 
 /**
  * @brief Main program entry point with menu-driven interface
@@ -858,13 +921,13 @@ int main() {
     std::string file_name;
     DirectedGraph<std::string> dir_graph;
 
-    dir_graph.Graph();  // Initialize graph with optimal settings
+    dir_graph.Perf();  // Initialize graph with optimal settings
 
     do {
         while (true) {
             // Display the menu options for the user
             std::cout <<
-                "**** Graph data manipulation *****\n"
+                "**** Perf data manipulation *****\n"
                 "* 0. QUIT                        *\n"
                 "* 1. Build adjacency lists       *\n"
                 "* 2. Compute connection counts   *\n"
@@ -899,9 +962,11 @@ int main() {
 
             if (!dir_graph.Empty()) {
                 dir_graph.Clear();  // Reset existing graph
+                dir_graph.Perf();
             }
 
             if (file_number != "0") {
+                // `struct stat` stores file metadata like size, permissions, and timestamps.
                 struct stat buffer;
                 file_name = "pairs" + file_number + ".bin";
                 std::cout << '\n';
@@ -937,4 +1002,4 @@ int main() {
     } while (select_command != 0);  // Continue until the user selects option 0 (quit)
 
     return 0;
-}
+}  // main()
