@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex04_27_10927262.cpp
  * @brief A program that implements a directed graph with weighted edges and parallel processing capabilities.
- * @version 2.0.0
+ * @version 2.0.1
  *
  * @details
  * This program implements a directed graph data structure that supports:
@@ -29,18 +29,19 @@
 #include <fstream>             // File stream operations (input/output file streams)
 #include <iomanip>             // I/O formatting (setw, setprecision)
 #include <string>              // String class and operations
+#include <regex>               // Regular expressions support (regex_match, regex_search)
+
+#include <memory>              // Smart pointers (unique_ptr, shared_ptr, weak_ptr) and allocators
 
 #include <vector>              // Dynamic array container
 #include <deque>               // Double-ended queue container
 #include <queue>               // Queue container (FIFO)
-#include <stack>
 #include <unordered_set>       // Unordered associative container (hash set)
 #include <unordered_map>       // Unordered associative container (hash map)
 
 #include <algorithm>           // Algorithms (sorting, searching, transforming)
 #include <functional>          // Function objects and type erasure (std::function)
 #include <utility>             // Utility components (pair, move, forward)
-#include <regex>
 
 #include <thread>              // Thread support (std::thread)
 #include <mutex>               // Mutual exclusion (mutexes, lock guards)
@@ -110,11 +111,10 @@ class ThreadPool {
      * @param thread_count Number of worker threads to create.
      */
     explicit ThreadPool(size_t thread_count, bool enable_work_stealing = true)
-        : stop(false), 
-          threads(thread_count), 
+        : stop(false),
+          threads(thread_count),
           thread_exec_times(thread_count),
           work_stealing_enabled(enable_work_stealing) {
-        
         // Create task queues
         for (size_t i = 0; i < thread_count; ++i) {
             queues.emplace_back(std::make_unique<WorkerQueue>());
@@ -174,8 +174,7 @@ class ThreadPool {
      */
     template <class FunctionType, class... ArgumentTypes>
     auto Enqueue(FunctionType&& task_function, ArgumentTypes&&... args)
-            -> std::future<decltype(task_function(args...))> 
-    {
+            -> std::future<decltype(task_function(args...))>{
         // Get the return type of the task function
         using ReturnType = decltype(task_function(args...));
 
@@ -269,13 +268,11 @@ class ThreadPool {
             // Try to get work from own queue first
             if (PopTask(index, task)) {
                 ExecuteTask(index, task);
-            } 
-            // Then try stealing if enabled and no local work
-            else if (work_stealing_enabled && StealTask(index, task)) {
+            } else if (work_stealing_enabled && StealTask(index, task)) {
+                // Then try stealing if enabled and no local work
                 ExecuteTask(index, task);
-            }
-            // No work available
-            else {
+            } else {
+                // No work available
                 std::unique_lock<std::mutex> lock(queues[index]->mtx);
                 queues[index]->cv.wait_for(lock, std::chrono::milliseconds(100));
             }
@@ -366,7 +363,7 @@ class ThreadPool {
         auto start = std::chrono::steady_clock::now();  // Start timer
         task();                                                     // Execute task
         auto end = std::chrono::steady_clock::now();    // Stop timer
-        
+
         // Record duration in thread's execution time total
         auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
         thread_exec_times[index].fetch_add(duration);  // Atomic update
@@ -378,7 +375,7 @@ class ThreadPool {
     std::vector<std::unique_ptr<WorkerQueue>> queues;     // Per-thread task queues
 
     // Task distribution
-    std::mt19937 rng { std::random_device{}() };      // Random number generator
+    std::mt19937 rng { std::random_device {}() };     // Random number generator
     std::uniform_int_distribution<size_t> dist;           // Distribution for queue selection
     const bool work_stealing_enabled;                     // Work stealing (Default true)
 
@@ -599,7 +596,7 @@ class DirectedGraph {
                 // Sort each path for consistent output
                 std::stable_sort(nodes.begin(), nodes.end(),
                     [](const std::pair<NodeType, float>& first, const std::pair<NodeType, float>& second) {
-                        return first.first < second.first; 
+                        return first.first < second.first;
                     });
 
                 // Format publisher header with connection count
@@ -701,8 +698,8 @@ class DirectedGraph {
         std::sort(publisher_list.begin(), publisher_list.end(),
                 [](const std::pair<NodeType, size_t>& first,
                    const std::pair<NodeType, size_t>& second) {
-                    return first.second != second.second ? 
-                           first.second > second.second : 
+                    return first.second != second.second ?
+                           first.second > second.second :
                            first.first < second.first;
                 });
 
@@ -715,7 +712,20 @@ class DirectedGraph {
         #endif
     }
 
-    void ComputeAllConnectionWtCounts(const std::string& mode, 
+    /**
+    * @brief Computes weighted connection counts for all nodes in parallel using BFS/DFS.
+    * 
+    * This function performs parallel graph traversal (using RunSimpleDFS) for all nodes in publisher_list,
+    * calculates connection counts with weights above threshold, and sorts the results.
+    * 
+    * @param mode Operation mode (unused in current implementation)
+    * @param weight_threshold Minimum edge weight to consider for connections
+    * @param min_batch_size Minimum number of nodes to process per thread (default=4)
+    * 
+    * @note Uses thread pool for parallel execution
+    * @note Results are stored in weight_publisher_list and sorted by connection count
+    */
+    void ComputeAllConnectionWtCounts(const std::string& mode,
                                       const float& weight_threshold, size_t min_batch_size = 4) {
         #ifdef DEBUG
             auto start_time = std::chrono::steady_clock::now();
@@ -723,8 +733,11 @@ class DirectedGraph {
                     << std::thread::hardware_concurrency()
                     << " threads, min_batch_size=" << min_batch_size);
         #endif
+
+        // Clear and initialize data structures
         weight_reachable_vec.clear();
 
+        // Pre-allocate space for all publisher nodes
         for (const auto& key : publisher_list) {
             weight_reachable_vec[key.first] = {};
         }
@@ -732,13 +745,16 @@ class DirectedGraph {
         weight_publisher_list.clear();
         total_node_count = 0;
 
-        // Parallel BFS execution block
+        // Parallel DFS execution block
         {
+            // Create thread pool with maximum available threads
             ThreadPool pool(std::thread::hardware_concurrency());
             size_t total_keys = publisher_list.size();
+
+            // Calculate number of batches needed
             size_t batch_count = (total_keys + min_batch_size - 1) / min_batch_size;
 
-            // Batch processing setup
+            // Process in batches to balance workload
             for (size_t batch_index = 0; batch_index < batch_count; ++batch_index) {
                 size_t start_index = batch_index * min_batch_size;
                 size_t end_index = std::min(start_index + min_batch_size, total_keys);
@@ -747,12 +763,13 @@ class DirectedGraph {
                 pool.Enqueue([start_index, end_index, weight_threshold, this]() {
                     for (size_t i = start_index; i < end_index; ++i) {
                         NodeType key = publisher_list[i].first;
-
+                        // Perform DFS traversal for each node in batch
                         RunSimpleDFS(key, weight_threshold);
                     }
                 });
             }
 
+            // Wait for all tasks to complete
             pool.WaitAll();
         }
 
@@ -760,6 +777,8 @@ class DirectedGraph {
         for (auto& entry : publisher_list) {
             auto it = weight_reachable_vec.find(entry.first);
             std::vector<std::pair<NodeType, float>>& nodes = it->second;
+
+            // Only include nodes with connections
             if (it != weight_reachable_vec.end() && !nodes.empty()) {
                 weight_publisher_list.emplace_back(entry.first, it->second.size());
                 ++total_node_count;
@@ -767,9 +786,9 @@ class DirectedGraph {
         }
 
         #ifdef DEBUG
-            for (size_t i = 0; i < publisher_list.size(); ++i) {
-                if (publisher_list[i].second == 0) {
-                    DEBUG_LOG("\033[31mWarning: publisher_list[" << i << "] has 0 connections.\033[0m");
+            for (size_t i = 0; i < weight_publisher_list.size(); ++i) {
+                if (weight_publisher_list[i].second == 0) {
+                    DEBUG_LOG("\033[31mWarning: weight_publisher_list[" << i << "] has 0 connections.\033[0m");
                 }
             }
         #endif
@@ -778,8 +797,8 @@ class DirectedGraph {
         std::sort(weight_publisher_list.begin(), weight_publisher_list.end(),
                 [](const std::pair<NodeType, size_t>& first,
                    const std::pair<NodeType, size_t>& second) {
-                    return first.second != second.second ? 
-                           first.second > second.second : 
+                    return first.second != second.second ?
+                           first.second > second.second :
                            first.first < second.first;
                 });
 
@@ -949,76 +968,98 @@ class DirectedGraph {
             std::unique_lock<std::shared_mutex> write_lock(reachable_mutex);
             reachable_vec[source_node] = std::move(result);
         }
-    }
+    }  // RunSimpleBFS
 
-void RunSimpleDFS(const NodeType& source_node, const float& weight_threshold) {
-    std::unordered_map<NodeType, float> visited;   // Track best weights per node
-    std::deque<std::pair<NodeType, float>> stack;  // Deque holds node and current accumulated weight
+    /**
+    * @brief Performs a depth-first search (DFS) from a given source node with weight thresholding.
+    * 
+    * This function explores all reachable nodes from the source node using DFS, tracking accumulated
+    * weights along paths and only following edges that meet the weight threshold. It caches results
+    * for future queries.
+    * 
+    * @param source_node The starting node for the DFS traversal
+    * @param weight_threshold Minimum edge weight required to traverse an edge
+    * @warning This implementation contains potential race conditions in multi-threaded environments.
+    *          The cached results (weight_reachable_vec) are protected by a shared_mutex, but other
+    *          operations may need synchronization.
+    * 
+    * @note The function uses a deque as a stack (LIFO) for DFS implementation
+    * @note Results are cached in weight_reachable_vec for future queries
+    * @bug High concurrency may lead to undefined behavior. Consider additional synchronization
+    *      for visited map and stack operations in multi-threaded scenarios.
+    */
+    void RunSimpleDFS(const NodeType& source_node, const float& weight_threshold) {
+        std::unordered_map<NodeType, float> visited;   // Track best weights per node
+        std::deque<std::pair<NodeType, float>> stack;  // Deque holds node and current accumulated weight
 
-    // Initialize with source node (accumulated weight = 0)
-    stack.emplace_back(source_node, 0.0f);
-    visited[source_node] = 0.0f;
+        // Initialize with source node (accumulated weight = 0)
+        stack.emplace_back(source_node, 0.0f);
+        visited[source_node] = 0.0f;
 
-    while (!stack.empty()) {
-        const std::pair<NodeType, float>& top_element = stack.back();
-        const NodeType& current = top_element.first;
-        const float& acc_weight = top_element.second;
-        stack.pop_back(); // Mimic LIFO behavior like stack
+        while (!stack.empty()) {
+            // Get top element from stack (DFS)
+            const std::pair<NodeType, float>& top_element = stack.back();
+            const NodeType& current = top_element.first;
+            const float& acc_weight = top_element.second;
+            stack.pop_back();  // Mimic LIFO behavior like stack
+
+            {
+                //! FIXME: There must be race condition
+                // Check for cached reachability results
+                // std::shared_lock<std::shared_mutex> read_lock(reachable_mutex);
+                const auto& cache = weight_reachable_vec.find(current);
+                // If cached results exist, merge them with current visited map
+                if (cache != weight_reachable_vec.end() && !cache->second.empty()) {
+                    for (const auto& cached_entry : cache->second) {
+                        const NodeType& cached_node = cached_entry.first;
+                        const float& cached_weight = cached_entry.second;
+                        const auto& it = visited.find(cached_node);
+                        // Update if node not visited or found better (lower) weight
+                        if (it == visited.end() || cached_weight < it->second) {
+                            visited[cached_node] = cached_weight;
+                        }
+                    }
+                    continue;  // Skip processing neighbors since we used cache
+                }
+            }
+
+            // Check if current node exists in adjacency list
+            const auto& graph_node = adj_list.find(current);
+            if (graph_node == adj_list.end()) continue;  // No neighbors, skip
+
+            // Process all neighbors of current node
+            for (const auto& neighbor_pair : graph_node->second) {
+                const NodeType& neighbor = neighbor_pair.first;
+                const float& edge_weight = neighbor_pair.second;
+                float new_weight = acc_weight + edge_weight;
+
+                // Skip weak edges
+                if (edge_weight < weight_threshold) continue;
+
+                // Only proceed if not visited or found a better path
+                const auto& it = visited.find(neighbor);
+                if (it == visited.end() || new_weight < it->second) {
+                    visited[neighbor] = new_weight;
+                    stack.emplace_back(neighbor, new_weight);  // Push to back (stack behavior)
+                }
+            }
+        }
+
+        // Remove source_node from results
+        visited.erase(source_node);
+
+        // Prepare result vector of (NodeType, weight)
+        std::vector<std::pair<NodeType, float>> result;
+        result.reserve(visited.size());
+        for (const auto& entry : visited) {
+            result.emplace_back(entry.first, entry.second);
+        }
 
         {
-            //! FIXME: There must be race condition
-            // Check for cached reachability results
-            // std::shared_lock<std::shared_mutex> read_lock(reachable_mutex);
-            const auto& cache = weight_reachable_vec.find(current);
-            if (cache != weight_reachable_vec.end() && !cache->second.empty()) {
-                for (const auto& cached_entry : cache->second) {
-                    const NodeType& cached_node = cached_entry.first;
-                    const float& cached_weight = cached_entry.second;
-                    const auto& it = visited.find(cached_node);
-                    if (it == visited.end() || cached_weight < it->second) {
-                        visited[cached_node] = cached_weight;
-                    }
-                }
-                continue;
-            }
+            std::unique_lock<std::shared_mutex> write_lock(reachable_mutex);
+            weight_reachable_vec[source_node] = std::move(result);
         }
-
-        // Check neighbors
-        const auto& graph_node = adj_list.find(current);
-        if (graph_node == adj_list.end()) continue;
-
-        for (const auto& neighbor_pair : graph_node->second) {
-            const NodeType& neighbor = neighbor_pair.first;
-            const float& edge_weight = neighbor_pair.second;
-            float new_weight = acc_weight + edge_weight;
-
-            // Skip weak edges
-            if (edge_weight < weight_threshold) continue;
-
-            // Only proceed if not visited or found a better path
-            const auto& it = visited.find(neighbor);
-            if (it == visited.end() || new_weight < it->second) {
-                visited[neighbor] = new_weight;
-                stack.emplace_back(neighbor, new_weight); // Push to back, mimicking stack behavior
-            }
-        }
-    }
-
-    // Remove source_node from results
-    visited.erase(source_node);
-
-    // Prepare result vector of (NodeType, weight)
-    std::vector<std::pair<NodeType, float>> result;
-    result.reserve(visited.size());
-    for (const auto& entry : visited) {
-        result.emplace_back(entry.first, entry.second);
-    }
-
-    {
-        std::unique_lock<std::shared_mutex> write_lock(reachable_mutex);
-        weight_reachable_vec[source_node] = std::move(result);
-    }
-}
+    }  // RunSimpleDFS
 
 
     // Member variables with descriptions
@@ -1030,9 +1071,9 @@ void RunSimpleDFS(const NodeType& source_node, const float& weight_threshold) {
     mutable std::mutex log_mtx;  // Mutex for thread-safe logging
     std::shared_mutex reachable_mutex;
 
-    size_t publisher_count = 0;  // Count of publisher nodes
-    size_t node_count = 0;       // Total node count in graph
-    mutable size_t total_node_count = 0;
+    size_t publisher_count = 0;           // Count of publisher nodes
+    size_t node_count = 0;                // Total node count in graph
+    mutable size_t total_node_count = 0;  // Total node count for weight
 };
 
 /**
@@ -1096,8 +1137,10 @@ bool isFloat(const std::string& str) {
  * @param file_number File number suffix for input/output files
  */
 static void Task1(DirectedGraph<std::string>& dir_graph, const std::string& file_number) {
+    // Read file and write into graph
     ReadBinary(file_number, dir_graph);
 
+    // Save results to .adj file
     dir_graph.SaveToAdjFile(file_number);
 
     std::cout << "<<< There are " << dir_graph.GetPubCount() << " IDs in total. >>>\n\n"
@@ -1118,7 +1161,11 @@ static void Task2(DirectedGraph<std::string>& dir_graph, const std::string& file
     #ifdef DEBUG
         auto start_time = std::chrono::high_resolution_clock::now();
     #endif
+
+    // Core computation - connection counts
     dir_graph.ComputeAllConnectionCounts("max");
+
+    // Save results to .cnt file
     dir_graph.SaveToCntFile(file_number);
 
     std::cout << "<<< There are " << dir_graph.GetReachCount() << " IDs in total. >>>\n";
@@ -1132,20 +1179,30 @@ static void Task2(DirectedGraph<std::string>& dir_graph, const std::string& file
     #endif
 }  // Task2()
 
+/**
+ * @brief Task 3: Compute weighted connection counts and save results
+ * 
+ * 1. Prompts user for a float weight threshold value between [0,1]
+ * 2. Computes weighted connections using parallel DFS
+ * 3. Saves sorted results to output file
+ * 
+ * @param dir_graph Directed graph instance with pre-built adjacency lists
+ * @param file_number Numeric suffix for output filename
+ */
 static void Task3(DirectedGraph<std::string>& dir_graph, const std::string& file_number) {
-    #ifdef DEBUG
-        auto start_time = std::chrono::high_resolution_clock::now();
-    #endif
     std::string input_float = "";
     float value = 0.0f;
 
+    // User input validation loop
     do {
         std::cout << "Input a real number in [0,1]: " << std::flush;
         std::cin >> input_float;
 
+        // Validate float input
         if (isFloat(input_float)) {
             value = std::stof(input_float);
 
+            // Validate range
             if (0.0f <= value && value <= 1.0f) {
                 break;
             } else if (value > 1.0f) {
@@ -1157,7 +1214,13 @@ static void Task3(DirectedGraph<std::string>& dir_graph, const std::string& file
         std::cout << '\n';
     } while (true);
 
+    #ifdef DEBUG
+        auto start_time = std::chrono::high_resolution_clock::now();
+    #endif
+
+    // Core computation - weighted connection counts
     dir_graph.ComputeAllConnectionWtCounts("max", value);
+    // Save results to .inf file
     dir_graph.SaveToInfFile(file_number);
 
     std::cout << "\n<<< There are " << dir_graph.GetnTotalNodeCount() << " IDs in total. >>>\n";
@@ -1169,7 +1232,7 @@ static void Task3(DirectedGraph<std::string>& dir_graph, const std::string& file
 
         DEBUG_LOG("\033[33m[DEBUG] Execution Time: " << duration.count() << " ms\033[0m\n");
     #endif
-}  // Task2()
+}  // Task3()
 
 /**
  * @brief Main program entry point with menu-driven interface
@@ -1178,6 +1241,7 @@ static void Task3(DirectedGraph<std::string>& dir_graph, const std::string& file
  * 0. Quit program
  * 1. Build adjacency lists (Task 1)
  * 2. Compute connection counts (Task 2)
+ * 3. Estimate influence values (Task 3)
  * 
  * Handles input validation and coordinates task execution
  * 
@@ -1268,7 +1332,7 @@ int main() {
             if (dir_graph.Empty()) {
                 std::cout << "### There is no graph and choose 1 first. ###\n";
             } else {
-                // Execute Task 2
+                // Execute Task 3
                 std::cout << '\n';
                 Task3(dir_graph, file_number);
             }
