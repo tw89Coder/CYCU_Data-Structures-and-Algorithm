@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex05_27_10927262.cpp
  * @brief A program that implements a graph with weighted edges and parallel processing
- * @version 1.0.0
+ * @version 1.1.0
  *
  * @details
  * This program implements a graph data structure that supports:
@@ -636,96 +636,58 @@ public:
     }  // RunDFS()
 
     /**
-     * @brief Computes shortest paths from source node using bidirectional Dijkstra's algorithm.
-     *
-     * Uses thread pool for parallel distance calculations when component size > 50.
-     * Implements early termination when forward/backward searches meet.
-     *
-     * @param source Starting node identifier
-     * @return true if computation succeeded, false if source doesn't exist
-     */
+    * @brief Computes shortest paths from a source node to all other nodes in its component using Dijkstra's algorithm.
+    * 
+    * This implementation:
+    * 1. Performs a single Dijkstra pass from the source node
+    * 2. Filters results to only include nodes in the same connected component
+    * 3. Returns sorted results by ascending distance
+    * 
+    * @param source The starting node identifier
+    * @return true if computation succeeded, false if source node doesn't exist
+    */
     bool ComputeShortestDistance(const NodeType& source) {
         #ifdef DEBUG
             auto start_time = std::chrono::high_resolution_clock::now();
         #endif
-        
-        auto it = node_to_id_.find(source);
-        if (it == node_to_id_.end()) return false;
 
-        size_t src_id = it->second;
-        size_t cid = component_id_[src_id];
         path_min_value_.clear();
 
-        const size_t n = component_sets_[cid].size();
-        const size_t thread_count = std::thread::hardware_concurrency();
-        const size_t batch_size = (n + thread_count - 1) / thread_count;
+        // Locate source node ID in the mapping
+        auto src_it = node_to_id_.find(source);
+        if (src_it == node_to_id_.end()) {
+            std::cerr << "Source node not found.\n";
+            return false;
+        }
+        size_t src_id = src_it->second;
 
-        if (n < 50) {
-            for (size_t node_id : component_sets_[cid]) {
-                if (node_id == src_id) continue;
-                float distance = Dijkstra(src_id, node_id);
-                path_min_value_.emplace_back(Result{node_id, distance});
-            }
-        } else {
-            std::vector<size_t> targets;
-            for (size_t node_id : component_sets_[cid]) {
-                if (node_id != src_id) targets.push_back(node_id);
-            }
+        // Retrieve the connected component ID for the source node
+        size_t cid = component_id_[src_id];
 
-            std::mutex result_mtx;
-            std::vector<std::future<void>> futures;
+        // Compute shortest paths to all reachable nodes
+        std::vector<float> dist_map = DijkstraAll(src_id);  // Use vector instead of unordered_map
 
-            for (size_t i = 0; i < targets.size(); i += batch_size) {
-                size_t end = std::min(i + batch_size, targets.size());
-                futures.emplace_back(pool_.Enqueue([&, i, end]() {
-                    std::vector<Result> local_result;
-                    for (size_t j = i; j < end; ++j) {
-                        #ifdef DEBUG
-                            auto start_time2 = std::chrono::high_resolution_clock::now();
-                        #endif
+        // Collect distances for nodes in the same component (excluding source)
+        for (size_t target_id : component_sets_[cid]) {
+            if (target_id == src_id) continue;
 
-                        float distance = Dijkstra(src_id, targets[j]);
-
-                        #ifdef DEBUG
-                            std::mutex log_mtx_;
-                            auto end_time2 = std::chrono::high_resolution_clock::now();
-                            auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end_time2 - start_time2);
-
-                            DEBUG_LOG(" Index: " << j << "\033[33m Dij Execution Time: " << duration2.count() << " ms\033[0m\n");
-                        #endif
-                        local_result.emplace_back(Result{targets[j], distance});
-                    }
-                    std::lock_guard<std::mutex> lock(result_mtx);
-                    path_min_value_.insert(path_min_value_.end(), 
-                                         local_result.begin(), local_result.end());
-                }));
-            }
-
-            for (auto& f : futures) f.get();
+            // Use stored distance if available, otherwise mark as unreachable (INF)
+            float distance = (target_id < dist_map.size()) ? dist_map[target_id] : INF;
+            path_min_value_.emplace_back(Result{target_id, distance});
         }
 
-        // #ifdef DEBUG
-        //     auto start_time3 = std::chrono::high_resolution_clock::now();
-        // #endif
-        std::sort(path_min_value_.begin(), path_min_value_.end(),
+        // Sort results primarily by distance, secondarily by node ID
+        std::sort(path_min_value_.begin(), path_min_value_.end(), 
             [](const auto& a, const auto& b) {
-                return std::tie(a.weight, a.node_id) < 
-                       std::tie(b.weight, b.node_id);
+                return std::tie(a.weight, a.node_id) < std::tie(b.weight, b.node_id);
             });
-        // #ifdef DEBUG
-        //     std::mutex log_mtx_;
-        //     auto end_time3 = std::chrono::high_resolution_clock::now();
-        //     auto duration3 = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time3 - start_time3);
-
-        //     DEBUG_LOG("\033[33m DijSort Execution Time: " << duration3.count() << " ns\033[0m\n");
-        // #endif
 
         #ifdef DEBUG
             std::mutex log_mtx_;
             auto end_time = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
-
-            DEBUG_LOG(" n: " << n << "\033[33m Dij Execution Time: " << duration.count() << " ns\033[0m\n");
+            DEBUG_LOG("\033[33mSource: " << src_id << " | DijkstraAll execution time: " 
+                                         << duration.count() << " ns\033[0m\n");
         #endif
 
         return true;
@@ -983,90 +945,56 @@ public:
     }  // InternalDFS()
 
     /**
-     * @brief Bidirectional Dijkstra's algorithm implementation.
-     *
-     * Optimizations include:
-     * - Priority queues for both directions
-     * - Early termination when searches meet
-     * - Shared best distance tracking
-     *
-     * @param src_id Source node identifier
-     * @param target_id Destination node identifier
-     * @return Shortest path weight between nodes
-     */
-    float Dijkstra(size_t src_id, size_t target_id) {
-        const size_t N = id_to_node_.size();
-        std::vector<float> dist_fwd(N, INF);
-        std::vector<float> dist_bwd(N, INF);
-        std::vector<bool> visited_fwd(N, false);
-        std::vector<bool> visited_bwd(N, false);
+    * @brief Executes Dijkstra's algorithm to find shortest paths from a source node to all other nodes.
+    * 
+    * Implementation features:
+    * - Uses min-heap for efficient extraction of the next closest node
+    * - Tracks visited nodes to avoid reprocessing
+    * - Stores distances in a hash map for dynamic growth
+    * - Processes all reachable nodes from the source
+    * 
+    * @param src_id The source node ID
+    * @return unordered_map<size_t, float> Mapping of node IDs to their shortest path distances
+    */
+    std::vector<float> DijkstraAll(size_t src_id) {
+        const size_t N = id_to_node_.size();  // Total number of nodes
+        std::vector<float> dist(N, INF);      // Distance vector, initialized to infinity
+        std::vector<bool> visited(N, false);  // Tracks processed nodes
 
-        using QueueType = std::priority_queue<std::pair<float, size_t>,
+        // Min-heap priority queue: <distance, node_id>
+        using MinHeap = std::priority_queue<std::pair<float, size_t>,
                                             std::vector<std::pair<float, size_t>>,
                                             std::greater<>>;
-        QueueType pq_fwd, pq_bwd;
+        MinHeap pq;
 
-        dist_fwd[src_id] = 0.0f;
-        dist_bwd[target_id] = 0.0f;
+        // Initialize with the source node
+        dist[src_id] = 0.0f;
+        pq.emplace(0.0f, src_id);
 
-        pq_fwd.emplace(0.0f, src_id);
-        pq_bwd.emplace(0.0f, target_id);
+        while (!pq.empty()) {
+            // Extract the node with the shortest known distance
+            auto [dist_u, u] = pq.top();
+            pq.pop();
 
-        float best_dist = INF;
+            // Skip if already processed, preventing duplicate calculations
+            if (visited[u]) continue;
+            visited[u] = true;
 
-        while (!pq_fwd.empty() || !pq_bwd.empty()) {
-            // Forward expansion
-            if (!pq_fwd.empty()) {
-                auto [dist_u, u] = pq_fwd.top();
-                pq_fwd.pop();
-                if (dist_u > dist_fwd[u]) continue;
-                visited_fwd[u] = true;
+            // Relax all outgoing edges
+            for (const Edge& edge : adj_list_[u]) {
+                size_t v = edge.neighbor_id;
+                float new_dist = dist[u] + edge.weight;
 
-                if (visited_bwd[u]) {
-                    best_dist = std::min(best_dist, dist_fwd[u] + dist_bwd[u]);
-                }
-
-                for (const Edge& edge : adj_list_[u]) {
-                    float new_dist = dist_fwd[u] + edge.weight;
-                    if (new_dist < dist_fwd[edge.neighbor_id]) {
-                        dist_fwd[edge.neighbor_id] = new_dist;
-                        pq_fwd.emplace(new_dist, edge.neighbor_id);
-                    }
-                }
-            }
-
-            // Reverse expansion (actually the same for undirected graphs)
-            if (!pq_bwd.empty()) {
-                auto [dist_v, v] = pq_bwd.top();
-                pq_bwd.pop();
-                if (dist_v > dist_bwd[v]) continue;
-                visited_bwd[v] = true;
-
-                if (visited_fwd[v]) {
-                    best_dist = std::min(best_dist, dist_bwd[v] + dist_fwd[v]);
-                }
-
-                for (const Edge& edge : adj_list_[v]) {
-                    float new_dist = dist_bwd[v] + edge.weight;
-                    if (new_dist < dist_bwd[edge.neighbor_id]) {
-                        dist_bwd[edge.neighbor_id] = new_dist;
-                        pq_bwd.emplace(new_dist, edge.neighbor_id);
-                    }
-                }
-            }
-
-            // Early termination
-            if (!pq_fwd.empty() && !pq_bwd.empty()) {
-                float min_fwd = pq_fwd.top().first;
-                float min_bwd = pq_bwd.top().first;
-                if (min_fwd + min_bwd >= best_dist) {
-                    break;
+                // Update distance if a shorter path is found
+                if (new_dist < dist[v]) {
+                    dist[v] = new_dist;
+                    pq.emplace(new_dist, v);  // Push into the priority queue for further exploration
                 }
             }
         }
 
-        return best_dist;
-    }  // Dijkstra()
+        return dist;  // Returns shortest distances from the source to all nodes
+    }  // DijkstraAll()
 
     // Member variables
     std::unordered_map<NodeType, size_t> node_to_id_;
