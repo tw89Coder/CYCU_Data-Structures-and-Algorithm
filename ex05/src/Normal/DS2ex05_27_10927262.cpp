@@ -2,7 +2,7 @@
  * @copyright 2025 Group 27. All rights reserved.
  * @file DS2ex05_27_10927262.cpp
  * @brief A program that implements a graph with weighted edges and parallel processing
- * @version 1.1.0
+ * @version 1.2.0
  *
  * @details
  * This program implements a graph data structure that supports:
@@ -653,31 +653,34 @@ public:
 
         path_min_value_.clear();
 
-        // Locate source node ID in the mapping
         auto src_it = node_to_id_.find(source);
         if (src_it == node_to_id_.end()) {
             std::cerr << "Source node not found.\n";
             return false;
         }
         size_t src_id = src_it->second;
-
-        // Retrieve the connected component ID for the source node
         size_t cid = component_id_[src_id];
 
-        // Compute shortest paths to all reachable nodes
-        std::vector<float> dist_map = DijkstraAll(src_id);  // Use vector instead of unordered_map
+        // Check if there is already a record for this source
+        auto dist_it = all_pairs_dist_.find(src_id);
+        const std::vector<float>* dist_ptr;
 
-        // Collect distances for nodes in the same component (excluding source)
+        if (dist_it != all_pairs_dist_.end()) {
+            dist_ptr = &dist_it->second;  // Use cached results
+        } else {
+            std::vector<float> dist_map = DijkstraAll(src_id);
+            dist_ptr = &all_pairs_dist_.emplace(src_id, std::move(dist_map)).first->second;
+        }
+
+        // Assemble path_min_value_
         for (size_t target_id : component_sets_[cid]) {
             if (target_id == src_id) continue;
 
-            // Use stored distance if available, otherwise mark as unreachable (INF)
-            float distance = (target_id < dist_map.size()) ? dist_map[target_id] : INF;
+            float distance = (target_id < dist_ptr->size()) ? (*dist_ptr)[target_id] : INF;
             path_min_value_.emplace_back(Result{target_id, distance});
         }
 
-        // Sort results primarily by distance, secondarily by node ID
-        std::sort(path_min_value_.begin(), path_min_value_.end(), 
+        std::sort(path_min_value_.begin(), path_min_value_.end(),
             [](const auto& a, const auto& b) {
                 return std::tie(a.weight, a.node_id) < std::tie(b.weight, b.node_id);
             });
@@ -687,7 +690,7 @@ public:
             auto end_time = std::chrono::high_resolution_clock::now();
             auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(end_time - start_time);
             DEBUG_LOG("\033[33mSource: " << src_id << " | DijkstraAll execution time: " 
-                                         << duration.count() << " ns\033[0m\n");
+                                        << duration.count() << " ns\033[0m\n");
         #endif
 
         return true;
@@ -739,6 +742,8 @@ public:
         component_id_.clear();
         visited_.clear();
         path_min_value_.clear();
+        all_pairs_dist_.clear();
+        dist_visited_.clear();
         node_count = 0;
         next_component_ = 0;
     }
@@ -752,6 +757,10 @@ public:
         component_id_.reserve(8 * 1024);
         visited_.reserve(8 * 1024);
         path_min_value_.reserve(8 * 1024);
+        all_pairs_dist_.max_load_factor(0.25);
+        all_pairs_dist_.reserve(8 * 1024);
+        dist_visited_.max_load_factor(0.25);
+        dist_visited_.reserve(8 * 1024);
     }
 
  private:
@@ -956,44 +965,49 @@ public:
     * @param src_id The source node ID
     * @return unordered_map<size_t, float> Mapping of node IDs to their shortest path distances
     */
-    std::vector<float> DijkstraAll(size_t src_id) {
-        const size_t N = id_to_node_.size();  // Total number of nodes
-        std::vector<float> dist(N, INF);      // Distance vector, initialized to infinity
-        std::vector<bool> visited(N, false);  // Tracks processed nodes
+    std::vector<float>& DijkstraAll(size_t src_id) {
+        auto& dist = all_pairs_dist_[src_id];
+        auto& visited = dist_visited_[src_id];
 
-        // Min-heap priority queue: <distance, node_id>
+        const size_t N = id_to_node_.size();
+        if (dist.size() != N) dist.assign(N, INF);
+        if (visited.size() != N) visited.assign(N, false);
+
         using MinHeap = std::priority_queue<std::pair<float, size_t>,
                                             std::vector<std::pair<float, size_t>>,
                                             std::greater<>>;
         MinHeap pq;
 
-        // Initialize with the source node
-        dist[src_id] = 0.0f;
-        pq.emplace(0.0f, src_id);
+        // The starting point must be initialized to 0 and pushed into the queue (if it has not been visited yet)
+        if (!visited[src_id]) {
+            dist[src_id] = 0.0f;
+            pq.emplace(0.0f, src_id);
+        }
+
+        // Only expand nodes that have not been processed yet
+        for (size_t i = 0; i < N; ++i) {
+            if (!visited[i] && dist[i] != INF)
+                pq.emplace(dist[i], i);
+        }
 
         while (!pq.empty()) {
-            // Extract the node with the shortest known distance
             auto [dist_u, u] = pq.top();
             pq.pop();
 
-            // Skip if already processed, preventing duplicate calculations
             if (visited[u]) continue;
             visited[u] = true;
 
-            // Relax all outgoing edges
             for (const Edge& edge : adj_list_[u]) {
                 size_t v = edge.neighbor_id;
                 float new_dist = dist[u] + edge.weight;
-
-                // Update distance if a shorter path is found
                 if (new_dist < dist[v]) {
                     dist[v] = new_dist;
-                    pq.emplace(new_dist, v);  // Push into the priority queue for further exploration
+                    pq.emplace(new_dist, v);
                 }
             }
         }
 
-        return dist;  // Returns shortest distances from the source to all nodes
+        return dist;
     }  // DijkstraAll()
 
     // Member variables
@@ -1006,6 +1020,8 @@ public:
     std::vector<std::vector<size_t>> component_sets_;
     std::vector<size_t> component_id_;
     std::atomic<size_t> next_component_{0};
+    std::unordered_map<size_t, std::vector<float>> all_pairs_dist_;  // src_id -> distances
+    std::unordered_map<size_t, std::vector<bool>> dist_visited_;     // src_id -> visited flags
 
     // Traversal status
     std::vector<bool> visited_;
